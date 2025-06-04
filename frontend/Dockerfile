@@ -1,18 +1,24 @@
-FROM node:16-alpine
+FROM node:18-alpine
 
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Clean install dependencies
+RUN npm ci --prefer-offline --no-audit
 
-# Copy the rest of the application
+# Copy source code
 COPY . .
 
-# Expose the port
+# Set environment for Docker
+ENV NODE_ENV=production
+
+# Build the app
+RUN npm run build
+
+# Expose port
 EXPOSE 3000
 
-# Command to run the application
-CMD ["npm", "start"] 
+# Use preview mode to serve built app with proxy support
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "3000"]

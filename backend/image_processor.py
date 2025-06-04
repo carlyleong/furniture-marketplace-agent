@@ -20,7 +20,7 @@ class ImageProcessor:
             
             # Resize if too large
             if img.size[0] > self.max_size[0] or img.size[1] > self.max_size[1]:
-                img.thumbnail(self.max_size, Image.Resampling.LANCZOS)
+                img.thumbnail(self.max_size, Image.LANCZOS)
             
             # Enhance image
             img = self._enhance_image(img)
@@ -59,7 +59,7 @@ class ImageProcessor:
                 img = img.convert('RGB')
             
             # Create thumbnail
-            img.thumbnail(size, Image.Resampling.LANCZOS)
+            img.thumbnail(size, Image.LANCZOS)
             
             # Save thumbnail
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
