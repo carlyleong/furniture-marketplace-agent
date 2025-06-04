@@ -147,10 +147,21 @@ async def auto_analyze_multiple_furniture(files: List[UploadFile] = File(...)):
                 print(f"⚠️ Skipping non-image file: {file.filename}")
                 continue
                 
-            # Generate unique filename
+            # Generate unique filename with sanitized name
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             prefix = "lg_" if LANGGRAPH_AVAILABLE else "leg_"
-            filename = f"{prefix}{timestamp}_{i:02d}_{file.filename}"
+            
+            # Sanitize the original filename
+            original_name = file.filename
+            sanitized_name = "".join(c for c in original_name if c.isalnum() or c in ('.', '-', '_')).replace(' ', '_')
+            if len(sanitized_name) > 50:  # Limit filename length
+                name_parts = sanitized_name.rsplit('.', 1)
+                if len(name_parts) == 2:
+                    sanitized_name = name_parts[0][:45] + '.' + name_parts[1]
+                else:
+                    sanitized_name = sanitized_name[:50]
+            
+            filename = f"{prefix}{timestamp}_{i:02d}_{sanitized_name}"
             file_path = os.path.join("uploads", filename)
             
             # Save file
@@ -170,244 +181,296 @@ async def auto_analyze_multiple_furniture(files: List[UploadFile] = File(...)):
         # Try LangGraph with proper async handling
         try:
             if LANGGRAPH_AVAILABLE:
-                # Direct async call - this should work in FastAPI context
+                print("🚀 Using LangGraph workflow...")
                 result = await furniture_classifier.classify_and_group_photos(saved_paths)
+                
+                # Check if LangGraph actually succeeded
+                if result.get("success") and result.get("classification_method") == "LANGGRAPH_WORKFLOW":
+                    print("✅ LangGraph completed successfully!")
+                    # Calculate processing time
+                    end_time = datetime.now()
+                    total_processing_time = (end_time - start_time).total_seconds()
+                    
+                    # Add timing information
+                    for listing in result.get("listings", []):
+                        listing["processing_time"] = total_processing_time
+                    
+                    # IMPORTANT: Process images for display (was missing for LangGraph path!)
+                    print("📸 Processing images for display...")
+                    for listing in result.get("listings", []):
+                        processed_images = []
+                        for image_info in listing.get("images", []):
+                            try:
+                                original_path = None
+                                # Find the original file path
+                                for path in saved_paths:
+                                    if os.path.basename(path) == image_info["filename"]:
+                                        original_path = path
+                                        break
+                                
+                                if original_path:
+                                    # Create processed version
+                                    processed_filename = f"processed_{os.path.basename(original_path)}"
+                                    processed_path = os.path.join("processed", processed_filename)
+                                    shutil.copy2(original_path, processed_path)
+                                    
+                                    image_info["processed_url"] = f"/processed/{processed_filename}"
+                                    processed_images.append(image_info)
+                                    print(f"   ✅ Processed: {processed_filename}")
+                                
+                            except Exception as e:
+                                print(f"   ⚠️ Image processing error: {e}")
+                                processed_images.append(image_info)
+                        
+                        listing["images"] = processed_images
+                    
+                    return {
+                        "status": "success",
+                        "total_time": total_processing_time,
+                        "method": "LANGGRAPH_WORKFLOW",
+                        "listings": result.get("listings", []),
+                        "total_images": result.get("total_images", len(saved_paths)),
+                        "total_furniture_items": result.get("total_furniture_items", 0),
+                        "classification_method": "LANGGRAPH_WORKFLOW"
+                    }
+                else:
+                    print(f"⚠️ LangGraph returned unsuccessful result: {result}")
+                    raise Exception("LangGraph workflow failed")
             else:
-                # Fallback to legacy system
-                result = await furniture_classifier.classify_and_group_photos(saved_paths)
+                print("⚠️ LangGraph not available, using 6-agent fallback")
+                raise Exception("LangGraph not available")
                 
         except Exception as e:
             error_msg = str(e).lower()
-            if "event loop" in error_msg or "runtime" in error_msg or "coroutine" in error_msg:
-                print(f"⚠️ LangGraph async issue detected: {str(e)}")
-                print("🔄 Falling back to real AI analysis...")
+            print(f"❌ LangGraph failed: {str(e)}")
+            print("🔄 Falling back to 6-agent AI analysis...")
                 
-                # Import the working AI agent system for fallback
-                try:
-                    from ai_agent_system import AIAgentSystem
-                    ai_system = AIAgentSystem()
+            # Import the working AI agent system for fallback
+            try:
+                from ai_agent_system import AIAgentSystem
+                ai_system = AIAgentSystem()
+                
+                result = {
+                    "success": True,
+                    "total_images": len(saved_paths),
+                    "total_furniture_items": len(saved_paths),
+                    "listings": [],
+                    "classification_method": "REAL_AI_ANALYSIS",
+                    "errors": []
+                }
+                
+                print("🤖 FORCING 6-AGENT AI ANALYSIS (NO FALLBACKS)...")
+                
+                # Process each image with real AI agents
+                for i, path in enumerate(saved_paths):
+                    print(f"\n🎯 AGENT ANALYSIS {i+1}/{len(saved_paths)}: {os.path.basename(path)}")
                     
-                    result = {
-                        "success": True,
-                        "total_images": len(saved_paths),
-                        "total_furniture_items": len(saved_paths),
-                        "listings": [],
-                        "classification_method": "REAL_AI_ANALYSIS",
-                        "errors": []
-                    }
-                    
-                    print("🤖 FORCING 6-AGENT AI ANALYSIS (NO FALLBACKS)...")
-                    
-                    # Process each image with real AI agents
-                    for i, path in enumerate(saved_paths):
-                        print(f"\n🎯 AGENT ANALYSIS {i+1}/{len(saved_paths)}: {os.path.basename(path)}")
+                    try:
+                        print(f"\n🚀 REAL AI ANALYSIS for: {os.path.basename(path)}")
                         
+                        # Test OpenAI connection first
                         try:
-                            print(f"\n🚀 REAL AI ANALYSIS for: {os.path.basename(path)}")
-                            
-                            # Test OpenAI connection first
-                            try:
-                                test_response = ai_system.openai_client.chat.completions.create(
-                                    model="gpt-4o",
-                                    messages=[{"role": "user", "content": "Say 'Working!'"}],
-                                    max_tokens=10
-                                )
-                                print(f"✅ OpenAI test: {test_response.choices[0].message.content}")
-                            except Exception as test_e:
-                                print(f"❌ OpenAI test failed: {test_e}")
-                                raise test_e
-                            
-                            # Run all agents with real AI
-                            print("🤖 Running REAL OpenAI agents...")
-                            agent_results = await ai_system.analyze_furniture_with_agents(path)
-                            
-                            # Generate enhanced listing
-                            listing_data = await ai_system.generate_enhanced_listing(
-                                agent_results, "Used - Good"
+                            test_response = ai_system.openai_client.chat.completions.create(
+                                model="gpt-4o",
+                                messages=[{"role": "user", "content": "Say 'Working!'"}],
+                                max_tokens=10
                             )
-                            
-                            processing_time = (datetime.now() - start_time).total_seconds()
-                            
-                            print(f"✅ REAL AI Analysis Complete in {processing_time:.1f}s")
-                            
-                            # Create listing
-                            filename = os.path.basename(path)
-                            listing = {
-                                "id": f"real_ai_{i}",
-                                "title": listing_data.get("title", "Quality Furniture"),
-                                "price": str(listing_data.get("price", 150)),
-                                "condition": listing_data.get("condition", "Used - Good"),
-                                "description": listing_data.get("description", "Quality furniture in good condition."),
-                                "category": listing_data.get("category", "Home & Garden//Furniture"),
-                                "confidence": 0.7,
-                                "images": [{
-                                    "id": f"img_{i}",
-                                    "filename": filename,
-                                    "url": f"/static/{filename}",
-                                    "processed_url": f"/processed/{filename}"
-                                }],
-                                "analysis_source": "REAL_AI_ANALYSIS",
-                                "processing_time": processing_time,
-                                "agent_results": agent_results
-                            }
-                            
-                            print(f"✨ Generated title: {listing['title']}")
-                            print(f"✅ SUCCESS: {listing['title']} (${listing['price']})")
-                            print(f"   📊 Confidence: {listing['confidence']} | Time: {processing_time:.1f}s | Agents: 5")
-                            print(f"   ⚠️ FALLBACK USED: REAL_AI_ANALYSIS")
-                            
-                            result["listings"].append(listing)
-                            
-                        except Exception as agent_e:
-                            print(f"❌ Real AI analysis failed for {os.path.basename(path)}: {agent_e}")
-                            
-                            # Create minimal fallback listing
-                            filename = os.path.basename(path)
-                            listing = {
-                                "id": f"fallback_{i}",
-                                "title": f"Quality Furniture Item {i+1}",
-                                "price": "150",
-                                "condition": "Used - Good",
-                                "description": "Quality furniture in good condition. Perfect for your home!",
-                                "category": "Home & Garden//Furniture",
-                                "confidence": 0.5,
-                                "images": [{
-                                    "id": f"img_{i}",
-                                    "filename": filename,
-                                    "url": f"/static/{filename}",
-                                    "processed_url": f"/processed/{filename}"
-                                }],
-                                "analysis_source": "MINIMAL_FALLBACK",
-                                "processing_time": 1.0,
-                                "error": str(agent_e)
-                            }
-                            result["listings"].append(listing)
-                            result["errors"].append(f"Agent analysis failed for {filename}: {str(agent_e)}")
-                    
-                    success_rate = len([l for l in result["listings"] if l.get("confidence", 0) >= 0.6])
-                    total_items = len(result["listings"])
-                    
-                    print(f"\n🎉 ANALYSIS COMPLETE:")
-                    print(f"   📊 Success Rate: {success_rate}/{total_items} ({success_rate/total_items*100:.1f}%)")
-                    print(f"   🎯 Total Listings: {total_items}")
-                    
-                    # 🔗 GROUP SIMILAR FURNITURE TOGETHER
-                    print(f"\n🔗 GROUPING SIMILAR FURNITURE...")
-                    grouped_listings = []
-                    processed_indices = set()
-                    
-                    for i, listing in enumerate(result["listings"]):
-                        if i in processed_indices:
-                            continue
-                            
-                        # Start a new group with this listing
-                        group_title = listing.get("title", "").strip()
-                        group_category = listing.get("category", "").strip()
-                        group_images = listing.get("images", [])
-                        group_price = listing.get("price", "150")
+                            print(f"✅ OpenAI test: {test_response.choices[0].message.content}")
+                        except Exception as test_e:
+                            print(f"❌ OpenAI test failed: {test_e}")
+                            raise test_e
                         
-                        # Find similar listings to group together
-                        similar_indices = [i]
-                        for j, other_listing in enumerate(result["listings"]):
-                            if j <= i or j in processed_indices:
-                                continue
-                                
-                            other_title = other_listing.get("title", "").strip()
-                            other_category = other_listing.get("category", "").strip()
-                            
-                            # Check similarity criteria
-                            title_similarity = _calculate_title_similarity(group_title, other_title)
-                            category_match = group_category.lower() == other_category.lower()
-                            
-                            # New intelligent thresholds:
-                            # - 0.7+ for strong matches (same furniture + similar style/color)
-                            # - 0.6+ with category match for moderate matches  
-                            # - 0.5+ for desk variations (handled specially in similarity function)
-                            should_group = (
-                                title_similarity >= 0.7 or
-                                (title_similarity >= 0.6 and category_match) or
-                                (title_similarity >= 0.5 and 'desk' in group_title.lower() and 'desk' in other_title.lower())
-                            )
-                            
-                            if should_group:
-                                print(f"   🔗 Grouping: '{other_title}' with '{group_title}' (similarity: {title_similarity:.2f})")
-                                similar_indices.append(j)
-                                group_images.extend(other_listing.get("images", []))
-                                # Use the better price if available
-                                other_price = other_listing.get("price", "150")
-                                if other_price != "150" and group_price == "150":
-                                    group_price = other_price
+                        # Run all agents with real AI
+                        print("🤖 Running REAL OpenAI agents...")
+                        agent_results = await ai_system.analyze_furniture_with_agents(path)
                         
-                        # Create grouped listing
-                        grouped_listing = {
-                            "id": f"grouped_{len(grouped_listings)}",
-                            "title": group_title,
-                            "price": group_price,
-                            "condition": listing.get("condition", "Used - Good"),
-                            "description": listing.get("description", "Quality furniture in good condition."),
-                            "category": group_category,
-                            "confidence": listing.get("confidence", 0.7),
-                            "images": group_images,
-                            "analysis_source": listing.get("analysis_source", "REAL_AI_ANALYSIS"),
-                            "processing_time": listing.get("processing_time", 0),
-                            "agent_results": listing.get("agent_results", {}),
-                            "grouped_from": len(similar_indices),
-                            "photo_count": len(group_images)
-                        }
+                        # Generate enhanced listing
+                        listing_data = await ai_system.generate_enhanced_listing(
+                            agent_results, "Used - Good"
+                        )
                         
-                        grouped_listings.append(grouped_listing)
-                        processed_indices.update(similar_indices)
+                        processing_time = (datetime.now() - start_time).total_seconds()
                         
-                        if len(similar_indices) > 1:
-                            print(f"   ✅ Created group: '{group_title}' with {len(group_images)} photos from {len(similar_indices)} images")
-                        else:
-                            print(f"   📋 Single item: '{group_title}' with {len(group_images)} photos")
-                    
-                    # Update result with grouped listings
-                    original_count = len(result["listings"])
-                    result["listings"] = grouped_listings
-                    result["total_furniture_items"] = len(grouped_listings)
-                    
-                    print(f"\n🎯 GROUPING SUMMARY:")
-                    print(f"   📸 Original images: {original_count}")
-                    print(f"   🛋️ Furniture pieces: {len(grouped_listings)}")
-                    print(f"   📊 Grouping efficiency: {(original_count - len(grouped_listings))} images grouped")
-                    
-                except ImportError as import_e:
-                    print(f"❌ Could not import AI agent system: {import_e}")
-                    # Ultimate fallback
-                    result = {
-                        "success": True,
-                        "total_images": len(saved_paths),
-                        "total_furniture_items": len(saved_paths),
-                        "listings": [],
-                        "classification_method": "SIMPLE_FALLBACK",
-                        "errors": [f"LangGraph async issue: {str(e)}", f"AI agents not available: {str(import_e)}"]
-                    }
-                    
-                    # Create simple listings for each image
-                    for i, path in enumerate(saved_paths):
+                        print(f"✅ REAL AI Analysis Complete in {processing_time:.1f}s")
+                        
+                        # Create listing
                         filename = os.path.basename(path)
                         listing = {
-                            "id": f"simple_{i}",
-                            "title": f"Quality Furniture Item {i+1}",
-                            "price": "150",
-                            "condition": "Used - Good",
-                            "description": "Quality furniture in good condition. Perfect for your home!",
-                            "category": "Home & Garden//Furniture",
-                            "confidence": 0.6,
+                            "id": f"real_ai_{i}",
+                            "title": listing_data.get("title", "Quality Furniture"),
+                            "price": str(listing_data.get("price", 150)),
+                            "condition": listing_data.get("condition", "Used - Good"),
+                            "description": listing_data.get("description", "Quality furniture in good condition."),
+                            "category": listing_data.get("category", "Home & Garden//Furniture"),
+                            "confidence": 0.7,
                             "images": [{
                                 "id": f"img_{i}",
                                 "filename": filename,
                                 "url": f"/static/{filename}",
                                 "processed_url": f"/processed/{filename}"
                             }],
-                            "analysis_source": "SIMPLE_FALLBACK",
-                            "processing_time": 2.0
+                            "analysis_source": "REAL_AI_ANALYSIS",
+                            "processing_time": processing_time,
+                            "agent_results": agent_results
+                        }
+                        
+                        print(f"✨ Generated title: {listing['title']}")
+                        print(f"✅ SUCCESS: {listing['title']} (${listing['price']})")
+                        print(f"   📊 Confidence: {listing['confidence']} | Time: {processing_time:.1f}s | Agents: 5")
+                        print(f"   ⚠️ FALLBACK USED: REAL_AI_ANALYSIS")
+                        
+                        result["listings"].append(listing)
+                        
+                    except Exception as agent_e:
+                        print(f"❌ Real AI analysis failed for {os.path.basename(path)}: {agent_e}")
+                        
+                        # Create minimal fallback listing
+                        filename = os.path.basename(path)
+                        listing = {
+                            "id": f"fallback_{i}",
+                            "title": f"Quality Furniture Item {i+1}",
+                            "price": "150",
+                            "condition": "Used - Good",
+                            "description": "Quality furniture in good condition. Perfect for your home!",
+                            "category": "Home & Garden//Furniture",
+                            "confidence": 0.5,
+                            "images": [{
+                                "id": f"img_{i}",
+                                "filename": filename,
+                                "url": f"/static/{filename}",
+                                "processed_url": f"/processed/{filename}"
+                            }],
+                            "analysis_source": "MINIMAL_FALLBACK",
+                            "processing_time": 1.0,
+                            "error": str(agent_e)
                         }
                         result["listings"].append(listing)
-            else:
-                raise e  # Re-raise if it's a different error
+                        result["errors"].append(f"Agent analysis failed for {filename}: {str(agent_e)}")
+                
+                success_rate = len([l for l in result["listings"] if l.get("confidence", 0) >= 0.6])
+                total_items = len(result["listings"])
+                
+                print(f"\n🎉 ANALYSIS COMPLETE:")
+                print(f"   📊 Success Rate: {success_rate}/{total_items} ({success_rate/total_items*100:.1f}%)")
+                print(f"   🎯 Total Listings: {total_items}")
+                
+                # 🔗 GROUP SIMILAR FURNITURE TOGETHER
+                print(f"\n🔗 GROUPING SIMILAR FURNITURE...")
+                grouped_listings = []
+                processed_indices = set()
+                
+                for i, listing in enumerate(result["listings"]):
+                    if i in processed_indices:
+                        continue
+                        
+                    # Start a new group with this listing
+                    group_title = listing.get("title", "").strip()
+                    group_category = listing.get("category", "").strip()
+                    group_images = listing.get("images", [])
+                    group_price = listing.get("price", "150")
+                    
+                    # Find similar listings to group together
+                    similar_indices = [i]
+                    for j, other_listing in enumerate(result["listings"]):
+                        if j <= i or j in processed_indices:
+                            continue
+                            
+                        other_title = other_listing.get("title", "").strip()
+                        other_category = other_listing.get("category", "").strip()
+                        
+                        # Check similarity criteria
+                        title_similarity = _calculate_title_similarity(group_title, other_title)
+                        category_match = group_category.lower() == other_category.lower()
+                        
+                        # New intelligent thresholds:
+                        # - 0.7+ for strong matches (same furniture + similar style/color)
+                        # - 0.6+ with category match for moderate matches  
+                        # - 0.5+ for desk variations (handled specially in similarity function)
+                        should_group = (
+                            title_similarity >= 0.7 or
+                            (title_similarity >= 0.6 and category_match) or
+                            (title_similarity >= 0.5 and 'desk' in group_title.lower() and 'desk' in other_title.lower())
+                        )
+                        
+                        if should_group:
+                            print(f"   🔗 Grouping: '{other_title}' with '{group_title}' (similarity: {title_similarity:.2f})")
+                            similar_indices.append(j)
+                            group_images.extend(other_listing.get("images", []))
+                            # Use the better price if available
+                            other_price = other_listing.get("price", "150")
+                            if other_price != "150" and group_price == "150":
+                                group_price = other_price
+                    
+                    # Create grouped listing
+                    grouped_listing = {
+                        "id": f"grouped_{len(grouped_listings)}",
+                        "title": group_title,
+                        "price": group_price,
+                        "condition": listing.get("condition", "Used - Good"),
+                        "description": listing.get("description", "Quality furniture in good condition."),
+                        "category": group_category,
+                        "confidence": listing.get("confidence", 0.7),
+                        "images": group_images,
+                        "analysis_source": listing.get("analysis_source", "REAL_AI_ANALYSIS"),
+                        "processing_time": listing.get("processing_time", 0),
+                        "agent_results": listing.get("agent_results", {}),
+                        "grouped_from": len(similar_indices),
+                        "photo_count": len(group_images)
+                    }
+                    
+                    grouped_listings.append(grouped_listing)
+                    processed_indices.update(similar_indices)
+                    
+                    if len(similar_indices) > 1:
+                        print(f"   ✅ Created group: '{group_title}' with {len(group_images)} photos from {len(similar_indices)} images")
+                    else:
+                        print(f"   📋 Single item: '{group_title}' with {len(group_images)} photos")
+                
+                # Update result with grouped listings
+                original_count = len(result["listings"])
+                result["listings"] = grouped_listings
+                result["total_furniture_items"] = len(grouped_listings)
+                
+                print(f"\n🎯 GROUPING SUMMARY:")
+                print(f"   📸 Original images: {original_count}")
+                print(f"   🎯 Furniture pieces: {len(grouped_listings)}")
+                print(f"   📊 Grouping efficiency: {(original_count - len(grouped_listings))} images grouped")
+                
+            except ImportError as import_e:
+                print(f"❌ Could not import AI agent system: {import_e}")
+                # Ultimate fallback
+                result = {
+                    "success": True,
+                    "total_images": len(saved_paths),
+                    "total_furniture_items": len(saved_paths),
+                    "listings": [],
+                    "classification_method": "SIMPLE_FALLBACK",
+                    "errors": [f"LangGraph async issue: {str(e)}", f"AI agents not available: {str(import_e)}"]
+                }
+                
+                # Create simple listings for each image
+                for i, path in enumerate(saved_paths):
+                    filename = os.path.basename(path)
+                    listing = {
+                        "id": f"simple_{i}",
+                        "title": f"Quality Furniture Item {i+1}",
+                        "price": "150",
+                        "condition": "Used - Good",
+                        "description": "Quality furniture in good condition. Perfect for your home!",
+                        "category": "Home & Garden//Furniture",
+                        "confidence": 0.6,
+                        "images": [{
+                            "id": f"img_{i}",
+                            "filename": filename,
+                            "url": f"/static/{filename}",
+                            "processed_url": f"/processed/{filename}"
+                        }],
+                        "analysis_source": "SIMPLE_FALLBACK",
+                        "processing_time": 2.0
+                    }
+                    result["listings"].append(listing)
+        else:
+            raise e  # Re-raise if it's a different error
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
@@ -631,6 +694,56 @@ async def export_csv_with_organized_photos(listings: List[dict]):
         headers={"Content-Disposition": f"attachment; filename={export_prefix}_marketplace_export_{timestamp}.zip"}
     )
 
+@app.post("/api/export-csv")
+async def export_csv_simple(listings: List[dict]):
+    """Simple CSV export for frontend compatibility"""
+    if not listings:
+        raise HTTPException(status_code=400, detail="No listings provided")
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    export_prefix = "langgraph" if LANGGRAPH_AVAILABLE else "legacy"
+    
+    # Create temporary CSV file
+    csv_filename = f"{export_prefix}_marketplace_listings_{timestamp}.csv"
+    csv_path = os.path.join("exports", csv_filename)
+    
+    # Ensure exports directory exists
+    os.makedirs("exports", exist_ok=True)
+    
+    print(f"📊 Creating simple CSV export for {len(listings)} listings...")
+    
+    # Create CSV file
+    with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        
+        # Write header - exactly as specified by user
+        writer.writerow([
+            "TITLE", 
+            "PRICE", 
+            "CONDITION", 
+            "DESCRIPTION", 
+            "CATEGORY"
+        ])
+        
+        # Write data
+        for i, listing in enumerate(listings):
+            writer.writerow([
+                listing.get("title", f"Listing_{i+1}"),
+                listing.get("price", "150"),
+                listing.get("condition", "Used - Good"),
+                listing.get("description", "Quality furniture in good condition."),
+                listing.get("category", "Home & Garden//Furniture")
+            ])
+    
+    print(f"✅ CSV export complete: {csv_filename}")
+    
+    return FileResponse(
+        csv_path,
+        media_type="text/csv",
+        filename=csv_filename,
+        headers={"Content-Disposition": f"attachment; filename={csv_filename}"}
+    )
+
 # Legacy endpoints for backwards compatibility
 @app.post("/api/classify-furniture")
 async def classify_furniture_legacy(files: List[UploadFile] = File(...)):
@@ -641,6 +754,30 @@ async def classify_furniture_legacy(files: List[UploadFile] = File(...)):
 async def auto_analyze_legacy(files: List[UploadFile] = File(...)):
     """Legacy endpoint - redirects to new system"""
     return await auto_analyze_multiple_furniture(files)
+
+@app.get("/api/test-langgraph-simple")
+async def test_langgraph_simple():
+    """Test LangGraph workflow with simple test"""
+    try:
+        if not LANGGRAPH_AVAILABLE:
+            return {"error": "LangGraph not available"}
+        
+        print("🧪 Testing LangGraph workflow...")
+        result = await furniture_classifier.test_simple_workflow()
+        
+        return {
+            "success": result.get("success", False),
+            "message": "LangGraph test completed",
+            "result": result
+        }
+        
+    except Exception as e:
+        print(f"❌ LangGraph test failed: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "LangGraph test failed"
+        }
 
 @app.post("/api/test-langgraph")
 async def test_system(file: UploadFile = File(...)):

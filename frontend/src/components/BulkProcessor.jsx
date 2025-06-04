@@ -45,7 +45,7 @@ const BulkProcessor = ({ onComplete, onProgress }) => {
     formData.append('force_langgraph', 'true');
 
     try {
-      const response = await fetch('http://localhost:8000/api/auto-analyze-multiple', {
+      const response = await fetch('/api/auto-analyze-multiple', {
         method: 'POST',
         body: formData,
       });
@@ -56,7 +56,7 @@ const BulkProcessor = ({ onComplete, onProgress }) => {
 
       const data = await response.json();
       
-      setResults(data.results || []);
+      setResults(data.listings || []);
       setProcessing(false);
       
       onComplete?.(data);
