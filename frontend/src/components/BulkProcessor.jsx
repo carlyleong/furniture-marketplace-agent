@@ -13,6 +13,7 @@ import {
   Zap
 } from 'lucide-react';
 import ImageUploader from './ImageUploader';
+import { getApiUrl } from '../config/api';
 
 const BulkProcessor = ({ onComplete, onProgress }) => {
   const [selectedImages, setSelectedImages] = useState([]);
@@ -40,12 +41,9 @@ const BulkProcessor = ({ onComplete, onProgress }) => {
       formData.append('files', file);
     });
 
-    // Add processing options
-    formData.append('use_real_ai', useRealAI.toString());
-    formData.append('force_langgraph', 'true');
-
     try {
-      const response = await fetch('/api/auto-analyze-multiple', {
+      console.log('Starting image analysis...');
+      const response = await fetch(getApiUrl('/api/auto-analyze-multiple'), {
         method: 'POST',
         body: formData,
       });
@@ -55,16 +53,30 @@ const BulkProcessor = ({ onComplete, onProgress }) => {
       }
 
       const data = await response.json();
+      console.log('Analysis response:', data);
       
-      setResults(data.listings || []);
-      setProcessing(false);
-      
-      onComplete?.(data);
+      if (data.status === 'success' && data.listings) {
+        setResults(data.listings);
+        onComplete?.({
+          status: 'success',
+          listings: data.listings,
+          total_images: selectedImages.length,
+          method: data.method || 'langgraph'
+        });
+      } else {
+        throw new Error('Invalid response format');
+      }
       
     } catch (error) {
       console.error('Bulk processing error:', error);
+      onComplete?.({
+        status: 'error',
+        error: error.message,
+        listings: [],
+        total_images: selectedImages.length
+      });
+    } finally {
       setProcessing(false);
-      alert(`Processing failed: ${error.message}`);
     }
   };
 

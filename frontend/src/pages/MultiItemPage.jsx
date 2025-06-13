@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { CheckCircle, AlertCircle, Edit2, Save, X, Download, Split } from 'lucide-react'
 import axios from 'axios'
 import BulkProcessor from '../components/BulkProcessor'
+import { getApiUrl } from '../config/api'
 
 const MultiItemPage = () => {
   const [listings, setListings] = useState([])
@@ -56,7 +57,7 @@ const MultiItemPage = () => {
   const handleSaveListing = async (listingIndex) => {
     const listing = listings[listingIndex]
     try {
-      const response = await axios.post('/api/listings', {
+      const response = await axios.post(getApiUrl('/api/listings'), {
         ...listing,
         price: parseFloat(listing.price) || 0,
         auto_enhance_description: false
@@ -72,7 +73,7 @@ const MultiItemPage = () => {
   const handleSaveAll = async () => {
     try {
       const savePromises = listings.map(listing => 
-        axios.post('/api/listings', {
+        axios.post(getApiUrl('/api/listings'), {
           ...listing,
           price: parseFloat(listing.price) || 0,
           auto_enhance_description: false
@@ -104,7 +105,7 @@ const MultiItemPage = () => {
       console.log('Exporting data:', exportData)
       
       // Call backend CSV export endpoint
-      const response = await axios.post('/api/export-csv', exportData, {
+      const response = await axios.post(getApiUrl('/api/export-csv'), exportData, {
         responseType: 'blob'
       })
       
@@ -127,6 +128,67 @@ const MultiItemPage = () => {
     } catch (error) {
       console.error('Export error:', error)
       alert('Error exporting CSV: ' + (error.response?.data?.detail || error.message))
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  const handleExportWithPhotos = async () => {
+    try {
+      setIsExporting(true)
+      
+      // Prepare listings data for export
+      const exportData = listings.map(listing => ({
+        title: listing.title || '',
+        description: listing.description || '',
+        price: listing.price || '0',
+        condition: listing.condition || '',
+        category: listing.category || '',
+        images: listing.images || []
+      }))
+      
+      console.log('Exporting data with photos:', exportData)
+      
+      // Call backend CSV+Photos export endpoint
+      const response = await axios.post(getApiUrl('/api/export-csv-with-photos'), exportData)
+      
+      // Check if we got a JSON response with download URL (production with GCS)
+      if (response.data && typeof response.data === 'object' && response.data.download_url) {
+        // Direct download from GCS URL
+        const downloadUrl = response.data.download_url
+        const filename = response.data.filename || 'export.zip'
+        
+        const link = document.createElement('a')
+        link.href = downloadUrl
+        link.download = filename
+        link.target = '_blank' // Open in new tab as fallback
+        
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        
+        alert(`✅ ${response.data.message || 'Export complete!'}`)
+      } else {
+        // Handle as blob (local development or fallback)
+        const url = window.URL.createObjectURL(new Blob([response.data]))
+        const link = document.createElement('a')
+        link.href = url
+        
+        // Use current date for filename
+        const date = new Date().toISOString().split('T')[0]
+        link.download = `facebook-marketplace-export-${date}.zip`
+        
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(url)
+        
+        alert(`✅ Export complete! Downloaded ZIP with ${listings.length} listings and their photos.`)
+      }
+      
+    } catch (error) {
+      console.error('Export error:', error)
+      alert('Error exporting ZIP: ' + (error.response?.data?.detail || error.message))
     } finally {
       setIsExporting(false)
     }
@@ -214,6 +276,27 @@ const MultiItemPage = () => {
                 Save All Listings
               </button>
               <button
+                onClick={handleExportWithPhotos}
+                disabled={isExporting}
+                className={`px-4 py-2 rounded-lg transition-colors flex items-center ${
+                  isExporting 
+                    ? 'bg-gray-400 cursor-not-allowed' 
+                    : 'bg-purple-600 hover:bg-purple-700'
+                } text-white`}
+              >
+                {isExporting ? (
+                  <>
+                    <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Exporting...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4 mr-2" />
+                    Export ZIP with Photos
+                  </>
+                )}
+              </button>
+              <button
                 onClick={handleExportAll}
                 disabled={isExporting}
                 className={`px-4 py-2 rounded-lg transition-colors flex items-center ${
@@ -230,7 +313,7 @@ const MultiItemPage = () => {
                 ) : (
                   <>
                     <Download className="w-4 h-4 mr-2" />
-                    Export CSV
+                    Export CSV Only
                   </>
                 )}
               </button>
@@ -245,7 +328,8 @@ const MultiItemPage = () => {
             
             <div className="mt-4 text-sm text-gray-600">
               <p><strong>Save All:</strong> Saves listings to your local database</p>
-              <p><strong>Export CSV:</strong> Downloads CSV with photo URLs for Facebook Marketplace</p>
+              <p><strong>Export ZIP with Photos:</strong> Downloads a ZIP file containing the CSV and organized photo folders</p>
+              <p><strong>Export CSV Only:</strong> Downloads just the CSV file for Facebook Marketplace</p>
             </div>
           </div>
 
@@ -304,7 +388,16 @@ const MultiItemPage = () => {
                                 filename: image.filename
                               });
                               
-                              imageUrl = image.url || image.processed_url || `/static/${image.filename}`;
+                              // Try different URL patterns for production vs development
+                              if (image.processed_url && image.processed_url.startsWith('/api/image/')) {
+                                imageUrl = image.processed_url; // New API endpoint
+                              } else if (image.url) {
+                                imageUrl = image.url; // Static URL
+                              } else if (image.processed_url) {
+                                imageUrl = image.processed_url; // Legacy processed URL
+                              } else if (image.filename) {
+                                imageUrl = `/static/${image.filename}`; // Fallback
+                              }
                               console.log('Selected image URL:', imageUrl);
                             } else {
                               console.error('Invalid image data:', image);
@@ -329,8 +422,17 @@ const MultiItemPage = () => {
                                     
                                     // Try backup URLs in sequence
                                     if (image && typeof image === 'object') {
-                                      if (image.processed_url && imageUrl === image.processed_url && image.url) {
-                                        console.log(`🔄 RETRY: Trying backup URL: ${image.url}`);
+                                      if (image.filename && !imageUrl.includes('/api/image/')) {
+                                        const apiUrl = `/api/image/${image.filename}`;
+                                        console.log(`🔄 RETRY: Trying API endpoint: ${apiUrl}`);
+                                        e.target.src = apiUrl;
+                                        return;
+                                      } else if (image.processed_url && imageUrl !== image.processed_url) {
+                                        console.log(`🔄 RETRY: Trying processed URL: ${image.processed_url}`);
+                                        e.target.src = image.processed_url;
+                                        return;
+                                      } else if (image.url && imageUrl !== image.url) {
+                                        console.log(`🔄 RETRY: Trying original URL: ${image.url}`);
                                         e.target.src = image.url;
                                         return;
                                       } else if (image.filename && !imageUrl.includes(image.filename)) {

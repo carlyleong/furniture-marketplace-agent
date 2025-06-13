@@ -24,6 +24,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
+from visual_grouping import EnhancedGroupingAgent
 
 load_dotenv()
 
@@ -461,8 +462,36 @@ Return only JSON.
         return state
     
     def _ai_grouping_agent(self, all_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """AI Grouping Agent - analyze all images together to group photos of same furniture pieces"""
-        print(f"🔍 AI Grouping Agent analyzing {len(all_items)} images...")
+        """ENHANCED AI Grouping Agent using visual similarity and intelligent fallbacks"""
+        print(f"🔍 Enhanced Grouping Agent analyzing {len(all_items)} images...")
+        
+        try:
+            # Method 1: Use enhanced visual grouping
+            print("✅ Using enhanced visual grouping system")
+            grouping_agent = EnhancedGroupingAgent(self.client)
+            groups = grouping_agent.group_furniture_images(all_items)
+            
+            if groups:
+                print(f"✅ Enhanced grouping created {len(groups)} groups")
+                return groups
+            else:
+                print("⚠️ Enhanced grouping returned no results, falling back...")
+                
+        except Exception as e:
+            print(f"❌ Enhanced grouping failed: {str(e)}")
+            print("🔄 Falling back to original AI grouping...")
+        
+        # Method 2: Fallback to original AI text-based grouping
+        try:
+            return self._original_ai_grouping_agent(all_items)
+        except Exception as e2:
+            print(f"❌ Original AI grouping also failed: {str(e2)}")
+            print("🔄 Using simple individual grouping...")
+            return self._simple_individual_grouping(all_items)
+    
+    def _original_ai_grouping_agent(self, all_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Original AI Grouping Agent - analyze all images together to group photos of same furniture pieces"""
+        print(f"🔍 Original AI Grouping Agent analyzing {len(all_items)} images...")
         
         # Prepare image data for AI analysis
         image_descriptions = []
@@ -581,6 +610,30 @@ Return only JSON.
         except Exception as e:
             print(f"❌ AI Grouping Agent error: {str(e)}")
             raise e
+    
+    def _simple_individual_grouping(self, all_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Simple fallback - create individual groups for each item"""
+        print(f"🔧 Simple individual grouping for {len(all_items)} items")
+        
+        groups = []
+        for i, item in enumerate(all_items):
+            group = {
+                "group_id": f"individual_{i}",
+                "primary_category": item["classification"].get("category", "Furniture"),
+                "subcategory": item["classification"].get("subcategory", ""),
+                "style": item["classification"].get("style", ""),
+                "material": item["classification"].get("material", ""),
+                "all_items": [item],
+                "total_price": item["pricing"].get("suggested_price", 100),
+                "avg_confidence": item["classification"].get("classification_confidence", 0.5),
+                "avg_price": item["pricing"].get("suggested_price", 100),
+                "ai_reasoning": "Individual item (grouping failed)",
+                "ai_description": item["vision"].get("furniture_type", "Furniture")
+            }
+            groups.append(group)
+        
+        print(f"    ✅ Created {len(groups)} individual groups")
+        return groups
     
     def _listing_generation_node(self, state: FurnitureAnalysisState) -> FurnitureAnalysisState:
         """Listing generation node - create marketplace listings using AI"""

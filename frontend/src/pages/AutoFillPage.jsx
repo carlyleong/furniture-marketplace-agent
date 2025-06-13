@@ -3,6 +3,7 @@ import { useDropzone } from 'react-dropzone'
 import { Upload, Loader2, CheckCircle, AlertCircle, Edit2, Save, ArrowLeft, X, Zap, Star, Download } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
+import { getApiUrl } from '../config/api'
 
 const AutoFillPage = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -38,7 +39,7 @@ const AutoFillPage = () => {
 
     try {
       console.log('Starting auto-analysis...')
-      const response = await axios.post('/api/auto-analyze', formDataToSend, {
+      const response = await axios.post(getApiUrl('/api/auto-analyze'), formDataToSend, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -99,7 +100,7 @@ const AutoFillPage = () => {
 
   const handleSaveListing = async () => {
     try {
-      const response = await axios.post('/api/listings', {
+      const response = await axios.post(getApiUrl('/api/listings'), {
         ...formData,
         auto_enhance_description: false
       })

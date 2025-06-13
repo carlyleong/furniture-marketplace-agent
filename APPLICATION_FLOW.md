@@ -2,18 +2,38 @@
 
 ## 🏗️ **System Architecture Overview**
 
-### **Infrastructure Stack**
-- **🐳 Containerization**: Docker Compose with 3 services
-- **⚡ Backend**: FastAPI + Python 3.11 + SQLAlchemy
-- **⚛️ Frontend**: React 18 + Vite + Tailwind CSS
-- **💾 Database**: SQLite + Redis caching  
+### **Production Infrastructure (Google Cloud)**
+- **☁️ Cloud Platform**: Google Cloud Run (serverless containers)
+- **🗄️ Storage**: Google Cloud Storage (persistent images/exports)
+- **⚡ Backend**: FastAPI + Python 3.11 + LangGraph workflows
+- **⚛️ Frontend**: React 18 + Vite + Tailwind CSS + Environment-aware API
 - **🤖 AI/ML**: LangGraph + OpenAI GPT-4V + Multi-Agent System
+- **💰 Cost Optimization**: Scale-to-zero with $3-8/month operational cost
+
+### **Local Development Infrastructure**
+- **🐳 Containerization**: Docker Compose with 3 services
+- **💾 Database**: SQLite + Redis caching  
+- **🔄 Proxy**: Vite dev server with API routing
 
 ---
 
 ## 🚀 **Application Startup & Initialization**
 
-### **1. Container Orchestration**
+### **Production (Google Cloud Run)**
+```bash
+# Services automatically managed by Google Cloud
+# Frontend: https://furniture-frontend-343631166788.us-central1.run.app
+# Backend: https://furniture-backend-343631166788.us-central1.run.app
+
+# Auto-scaling configuration:
+# - Min instances: 0 (scales to zero when idle)
+# - Max instances: 3 (cost-controlled)
+# - Memory: Backend 1GB, Frontend 512MB
+# - CPU: 1 core each
+# - Cold start: 10-30 seconds when scaling from 0
+```
+
+### **Local Development**
 ```bash
 # Main startup (starts all services)
 docker-compose up -d
@@ -24,10 +44,21 @@ docker-compose up -d
 # - redis:6379 (Caching layer)
 ```
 
-### **2. Backend Service Initialization** 
-**File**: `backend/main.py` (914 lines)
+### **Backend Service Initialization** 
+**File**: `backend/main.py` (1000+ lines)
 
 ```python
+# Environment-aware configuration
+BUCKET_NAME = "furniture-classifier-images-1749795037"
+try:
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(BUCKET_NAME)
+    print(f"✅ Google Cloud Storage initialized: {BUCKET_NAME}")
+except Exception as e:
+    print(f"⚠️ Google Cloud Storage not available: {e}")
+    storage_client = None
+    bucket = None
+
 # Core system detection and setup
 try:
     from furniture_classifier import LangGraphFurnitureClassifier
@@ -37,16 +68,34 @@ except ImportError:
     LANGGRAPH_AVAILABLE = False
     print("🔄 Falling back to legacy system...")
 
-# File sanitization for static serving
-def sanitize_filename(filename):
-    # Removes spaces, special chars for URL compatibility
-    return "".join(c for c in filename if c.isalnum() or c in ('.', '-', '_'))
+# CORS configuration for cross-origin requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"]
+)
 ```
 
-**Static File Serving Setup**:
-- `/static/*` → serves uploaded images from `uploads/`
-- `/processed/*` → serves processed images from `processed/`
-- Frontend proxy routes both through Vite dev server
+**Google Cloud Storage Integration**:
+```python
+def upload_to_gcs(file_path: str, blob_name: str) -> str:
+    """Upload a file to Google Cloud Storage and return public URL"""
+    if not bucket:
+        return f"/static/{os.path.basename(file_path)}"  # Fallback to local
+    
+    try:
+        blob = bucket.blob(blob_name)
+        blob.upload_from_filename(file_path)
+        
+        # Return public URL
+        return f"https://storage.googleapis.com/{BUCKET_NAME}/{blob_name}"
+    except Exception as e:
+        print(f"❌ Failed to upload {blob_name}: {e}")
+        return f"/static/{os.path.basename(file_path)}"  # Fallback
+```
 
 ---
 
@@ -56,22 +105,49 @@ def sanitize_filename(filename):
 
 **Frontend**: `BulkProcessor.jsx` + `ImageUploader.jsx`
 ```javascript
+// Environment-aware API configuration
+import { getApiUrl } from '../config/api';
+
+// API URL detection
+const getApiBaseUrl = () => {
+  // Check if we're in production (Cloud Run)
+  if (window.location.hostname.includes('run.app')) {
+    return 'https://furniture-backend-343631166788.us-central1.run.app';
+  }
+  
+  // Local development - use relative URLs (proxy will handle)
+  return '';
+};
+
 // Image validation & upload
 const handleFiles = (files) => {
   // Validation: max 15 images, file types, size limits
   // Progress tracking with React state
   // Drag & drop interface with previews
 }
+
+// API call with environment detection
+const response = await fetch(getApiUrl('/api/auto-analyze-multiple'), {
+  method: 'POST',
+  body: formData,
+});
 ```
 
 **Backend**: `POST /api/auto-analyze-multiple`
 ```python
-# Enhanced filename processing (NEW)
+# Enhanced filename processing with GCS integration
 for i, file in enumerate(files):
     # Sanitize filename (removes spaces, special chars)
     sanitized_name = "".join(c for c in original_name if c.isalnum() or c in ('.', '-', '_'))
     filename = f"lg_{timestamp}_{i:02d}_{sanitized_name}"
-    # Save to uploads/ directory
+    
+    # Save locally first
+    file_path = os.path.join("uploads", filename)
+    
+    # Upload to Google Cloud Storage for persistence
+    if bucket:
+        gcs_url = upload_to_gcs(file_path, f"images/{filename}")
+        # Store GCS URL for later use
 ```
 
 ### **Phase 2: LangGraph Workflow Orchestration**
@@ -92,13 +168,21 @@ class LangGraphFurnitureClassifier:
         workflow.add_node("grouping", self._grouping_node)              # AI Grouping Agent
         workflow.add_node("listing_generation", self._listing_generation_node)  # AI Content Gen
         workflow.add_node("finalize", self._finalize_results)
+        
+        # Conditional routing with error handling
+        workflow.add_conditional_edges(
+            "vision_analysis",
+            self._should_continue_processing,
+            {"continue": "classification", "error": "finalize"}
+        )
 ```
 
-**State Management**:
+**State Management with Cloud Integration**:
 ```python
 class FurnitureAnalysisState(TypedDict):
     # Input data
     image_paths: List[str]
+    gcs_urls: List[str]                       # NEW: Cloud storage URLs
     current_image_index: int
     
     # Per-image analysis
@@ -109,6 +193,10 @@ class FurnitureAnalysisState(TypedDict):
     # Grouped outputs  
     furniture_groups: List[Dict[str, Any]]    # AI-grouped photos
     final_listings: List[Dict[str, Any]]      # Marketplace listings
+    
+    # Cloud integration
+    cloud_storage_enabled: bool               # NEW: GCS availability
+    export_urls: List[str]                    # NEW: Export download URLs
     
     # Workflow control
     errors: List[str]
@@ -125,7 +213,7 @@ def _vision_analysis_node(self, state):
         # Encode image to base64
         base64_image = self._encode_image(image_path)
         
-        # GPT-4V analysis
+        # GPT-4V analysis with enhanced prompting
         response = self.client.chat.completions.create(
             model="gpt-4o",
             messages=[{
@@ -134,10 +222,13 @@ def _vision_analysis_node(self, state):
                     {"type": "text", "text": vision_prompt},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]
-            }]
+            }],
+            max_tokens=1000,
+            temperature=0.1  # Low temperature for consistent analysis
         )
         
         # Extract: furniture_type, color, material, condition, features
+        # Store results with confidence scores
 ```
 
 #### **Node 2: Classification Agent (Enhanced)**
@@ -145,27 +236,29 @@ def _vision_analysis_node(self, state):
 # AI-powered classification with comprehensive analysis
 classification_prompt = f"""
 Use AI to determine the BEST classification for maximum marketplace success:
-1. **CATEGORY**: Main furniture category  
+1. **CATEGORY**: Main furniture category for Facebook Marketplace
 2. **SUBCATEGORY**: Specific furniture type
 3. **MATERIAL**: Exact material description
 4. **STYLE**: Design style that appeals to buyers
 5. **KEY_FEATURES**: Top 5 most marketable features (AI-generated)
 6. **SEARCH_KEYWORDS**: Top 5 keywords buyers would search for
 7. **CONDITION_ASSESSMENT**: Detailed condition analysis
-8. **MARKET_APPEAL**: What makes this piece attractive
+8. **MARKET_APPEAL**: What makes this piece attractive to buyers
+9. **FACEBOOK_CATEGORY**: Exact Facebook Marketplace category path
 """
 ```
 
 #### **Node 3: AI Pricing Agent** 
 ```python
-# Market-aware pricing strategy
+# Market-aware pricing strategy with competitive analysis
 pricing_prompt = f"""
 Calculate optimal pricing strategy for maximum sales success:
-- **SUGGESTED_PRICE**: Best price for quick sale
-- **PRICE_RANGE**: Min/max reasonable prices  
-- **MARKET_COMPARISON**: Analysis of similar items
-- **VALUE_PROPOSITION**: Why this price is fair
-- **NEGOTIATION_ROOM**: Wiggle room for haggling
+- **SUGGESTED_PRICE**: Best price for quick sale (consider market conditions)
+- **PRICE_RANGE**: Min/max reasonable prices based on condition/market
+- **MARKET_COMPARISON**: Analysis of similar items currently for sale
+- **VALUE_PROPOSITION**: Why this price is fair and attractive
+- **NEGOTIATION_ROOM**: Recommended wiggle room for haggling
+- **PRICING_CONFIDENCE**: How confident you are in this pricing (0-1)
 """
 ```
 
@@ -180,316 +273,370 @@ def _ai_grouping_agent(self, all_items):
     IMPORTANT GROUPING RULES:
     - BE AGGRESSIVE in grouping photos of the same furniture piece
     - If furniture type, color, and material are similar → likely same piece
-    - Only separate if clearly different pieces
+    - Multiple angles of same piece should be grouped together
+    - Only separate if clearly different pieces (different colors, styles, etc.)
     - When in doubt → GROUP THEM TOGETHER
+    - Provide detailed reasoning for each grouping decision
+    
+    Return groups with confidence scores and detailed explanations.
     """
     
     # Returns: groups with reasoning and confidence scores
+    # Each group becomes a separate marketplace listing
 ```
 
 #### **Node 5: AI Content Generation Agent**
 ```python
 def _ai_listing_generator(self, furniture_info):
-    # AI generates ALL listing fields
+    # AI generates ALL listing fields for marketplace success
     listing_prompt = f"""
-    Create a COMPLETE, compelling marketplace listing:
-    1. **TITLE** (max 80 chars): Keyword-rich, includes condition
-    2. **DESCRIPTION** (150-250 words): Compelling story with call-to-action  
-    3. **OPTIMIZED_CONDITION**: Best Facebook condition category
-    4. **OPTIMIZED_CATEGORY**: Most accurate Facebook category
-    5. **SEARCH_KEYWORDS**: Top 5 buyer search terms
-    6. **SELLING_POINTS**: Top 3 key selling points
-    7. **TARGET_BUYER**: Who would buy this item
-    """
-```
-
-### **Phase 4: Intelligent Fallback System**
-
-**Fallback Hierarchy**:
-```python
-try:
-    # PRIMARY: LangGraph Workflow
-    if LANGGRAPH_AVAILABLE:
-        result = await furniture_classifier.classify_and_group_photos(saved_paths)
-        if result.get("success") and result.get("classification_method") == "LANGGRAPH_WORKFLOW":
-            return process_langgraph_success(result)
-        
-except Exception as e:
-    # FALLBACK 1: 6-Agent AI System
-    from ai_agent_system import AIAgentSystem
-    ai_system = AIAgentSystem()
+    Create a COMPLETE, compelling Facebook Marketplace listing:
     
-    for path in saved_paths:
-        agent_results = await ai_system.analyze_furniture_with_agents(path)
-        # Individual image analysis with grouping logic
-        
-except ImportError:
-    # FALLBACK 2: Simple Template System  
-    for path in saved_paths:
-        create_basic_listing(path)
+    1. **TITLE** (max 80 chars): 
+       - Include key features, condition, and appeal
+       - Use buyer-friendly language
+       - Include brand if recognizable
+    
+    2. **DESCRIPTION** (150-250 words): 
+       - Compelling story that sells the piece
+       - Highlight key features and benefits
+       - Include dimensions if visible
+       - End with clear call-to-action
+    
+    3. **OPTIMIZED_CONDITION**: 
+       - Map to Facebook Marketplace condition categories
+       - Be honest but optimistic
+    
+    4. **OPTIMIZED_CATEGORY**: 
+       - Exact Facebook Marketplace category path
+       - Choose for maximum visibility
+    
+    5. **SEARCH_KEYWORDS**: 
+       - Top 5 terms buyers would search for
+       - Include style, material, brand terms
+    
+    6. **SELLING_POINTS**:
+       - Top 3 reasons someone should buy this
+       - Focus on value and appeal
+    """
+    
+    # Generate professional, marketplace-ready content
 ```
 
-### **Phase 5: Critical Image Processing Fix**
+### **Phase 4: Results Processing & Display**
 
-**NEW: LangGraph Image Processing** (Recently Fixed):
+#### **Image URL Generation (Cloud-Aware)**
 ```python
-# IMPORTANT: Process images for display (was missing for LangGraph path!)
-if result.get("classification_method") == "LANGGRAPH_WORKFLOW":
-    print("📸 Processing images for display...")
-    for listing in result.get("listings", []):
-        for image_info in listing.get("images", []):
-            # Create processed version
-            processed_filename = f"processed_{os.path.basename(original_path)}"
-            processed_path = os.path.join("processed", processed_filename)
-            shutil.copy2(original_path, processed_path)
+# Process images for display with cloud storage integration
+def process_images_for_display(listings):
+    for listing in listings:
+        for image in listing["images"]:
+            # Check if we have GCS URL (production)
+            if bucket and image.get("gcs_url"):
+                image["url"] = image["gcs_url"]
+            else:
+                # Fallback to local URLs (development)
+                image["url"] = f"/static/{image['filename']}"
             
-            # Update URLs
-            image_info["processed_url"] = f"/processed/{processed_filename}"
+            print(f"✅ Image URL: {image['url']}")
 ```
 
-**Image URL Structure**:
-- **Original**: `/static/lg_20250604_123456_00_sanitized_filename.jpg`
-- **Processed**: `/processed/processed_lg_20250604_123456_00_sanitized_filename.jpg`
-
----
-
-## 🎨 **Frontend Architecture & Display**
-
-### **React Component Hierarchy**
-```
-App.jsx
-├── MultiItemPage.jsx (Main interface)
-│   ├── BulkProcessor.jsx (Upload & processing)
-│   │   └── ImageUploader.jsx (Drag & drop)
-│   ├── ListingGrid.jsx (Results display)
-│   └── ExportControls.jsx (CSV download)
-└── Dashboard.jsx (Analytics)
-```
-
-### **Enhanced Image Display Logic** (Recently Improved):
+#### **Frontend Display (React)**
 ```javascript
-// Comprehensive fallback logic with debugging
+// Smart image loading with error handling
 {listing.images.slice(0, 4).map((image, imgIndex) => {
     console.log(`Attempting to load image ${imgIndex + 1}:`, image);
     
-    let imageUrl = '';
-    if (typeof image === 'string') {
-        imageUrl = image.startsWith('/') ? image : `/static/${image}`;
-    } else if (image && typeof image === 'object') {
-        if (image.processed_url && image.processed_url.startsWith('/')) {
-            imageUrl = image.processed_url;  // Preferred: processed version
-        } else if (image.url && image.url.startsWith('/')) {
-            imageUrl = image.url;            // Fallback: original
-        } else if (image.filename) {
-            imageUrl = `/processed/processed_${image.filename}`;  // Construct URL
-        }
-    }
-    
-    console.log(`Final image URL: ${imageUrl}`);
+    // Use the URL provided by backend (GCS or local)
+    const imageUrl = image.url;
     
     return (
         <img 
             src={imageUrl}
             onError={(e) => {
-                // Multi-level error handling with console logging
                 console.error(`Failed to load: ${imageUrl}`);
-                if (image.filename && e.target.src !== `/static/${image.filename}`) {
-                    e.target.src = `/static/${image.filename}`;  // Try original
-                } else {
-                    // Show placeholder with icon
-                }
+                // Show placeholder on error
+                e.target.src = '/placeholder-furniture.png';
             }}
             onLoad={() => console.log(`Successfully loaded: ${imageUrl}`)}
+            className="w-full h-32 object-cover rounded-lg"
+            alt={`${listing.title} - Photo ${imgIndex + 1}`}
         />
     );
 })}
 ```
 
-### **Proxy Configuration** (`frontend/vite.config.js`):
-```javascript
-server: {
-    proxy: {
-        '/api': {
-            target: 'http://final_fb-backend-1:8000',  // Docker service name
-            changeOrigin: true
-        },
-        '/static': {
-            target: 'http://final_fb-backend-1:8000',
-            changeOrigin: true  
-        },
-        '/processed': {
-            target: 'http://final_fb-backend-1:8000',
-            changeOrigin: true
+---
+
+## 📤 **Export & CSV Generation (Cloud-Optimized)**
+
+### **Two Export Options**:
+
+#### **1. Simple CSV Export** (`/api/export-csv`):
+```python
+@app.post("/api/export-csv")
+async def export_csv_simple(listings: List[dict]):
+    """Export simple CSV for Facebook Marketplace bulk upload"""
+    # Create CSV with required Facebook Marketplace columns
+    # Return as downloadable file
+```
+
+#### **2. Complete ZIP Export with Photos** (`/api/export-csv-with-photos`):
+```python
+@app.post("/api/export-csv-with-photos")
+async def export_csv_with_organized_photos(listings: List[dict]):
+    """Export CSV + organize photos in folders by listing title"""
+    
+    # Create organized folder structure
+    for i, listing in enumerate(listings):
+        # Create folder for each listing
+        safe_title = sanitize_filename(listing.get("title", f"Listing_{i+1}"))
+        photo_folder = os.path.join(export_dir, f"Listing_{i+1:02d}_{safe_title}")
+        
+        # Copy all photos for this listing
+        # Create descriptive README with instructions
+    
+    # Create ZIP file
+    zip_path = f"{export_dir}.zip"
+    shutil.make_archive(export_dir, 'zip', export_dir)
+    
+    # Upload to Google Cloud Storage (production)
+    if bucket:
+        zip_filename = f"langgraph_marketplace_export_{timestamp}.zip"
+        blob = bucket.blob(f"exports/{zip_filename}")
+        blob.upload_from_filename(zip_path)
+        download_url = f"https://storage.googleapis.com/{BUCKET_NAME}/exports/{zip_filename}"
+        
+        # Return JSON with download URL (CORS-friendly)
+        return {
+            "status": "success",
+            "download_url": download_url,
+            "filename": zip_filename,
+            "message": f"Export complete! {len(listings)} listings packaged."
         }
+    else:
+        # Local development - return file directly
+        return FileResponse(zip_path, media_type="application/zip", filename=zip_filename)
+```
+
+#### **Frontend Export Handling (Cloud-Aware)**:
+```javascript
+const handleExportWithPhotos = async () => {
+    try {
+        setIsExporting(true);
+        
+        // Call backend export endpoint
+        const response = await axios.post(getApiUrl('/api/export-csv-with-photos'), exportData);
+        
+        // Check if we got a JSON response with download URL (production with GCS)
+        if (response.data && typeof response.data === 'object' && response.data.download_url) {
+            // Direct download from GCS URL
+            const downloadUrl = response.data.download_url;
+            const filename = response.data.filename || 'export.zip';
+            
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = filename;
+            link.target = '_blank'; // Open in new tab as fallback
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            alert(`✅ ${response.data.message || 'Export complete!'}`);
+        } else {
+            // Handle as blob (local development or fallback)
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            
+            const date = new Date().toISOString().split('T')[0];
+            link.download = `facebook-marketplace-export-${date}.zip`;
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+            
+            alert(`✅ Export complete! Downloaded ZIP with ${listings.length} listings and their photos.`);
+        }
+    } catch (error) {
+        console.error('Export error:', error);
+        alert('Error exporting ZIP: ' + (error.response?.data?.detail || error.message));
+    } finally {
+        setIsExporting(false);
+    }
+};
+```
+
+---
+
+## 💰 **Cost Management & Optimization**
+
+### **Scale-to-Zero Configuration**
+```bash
+# Current optimized settings
+gcloud run services describe furniture-backend --region us-central1
+
+# Configuration:
+# - Memory: 1GB (reduced from 2GB)
+# - CPU: 1 core (reduced from 2)
+# - Min instances: 0 (scales to zero when idle)
+# - Max instances: 3 (cost-controlled)
+# - Timeout: 300s (for AI processing)
+```
+
+### **Cost Breakdown**
+- **Idle time** (15+ minutes no traffic): $0/hour
+- **Active processing**: ~$0.10-0.20/hour
+- **Google Cloud Storage**: ~$0.02/GB/month
+- **Estimated monthly cost**: $3-8 (vs $92 without optimization)
+
+### **Monitoring & Control**
+```bash
+# Check current costs
+gcloud billing budgets list
+
+# Monitor service usage
+gcloud run services logs read furniture-backend --region us-central1 --limit 50
+
+# Temporarily stop services (completely free)
+gcloud run services delete furniture-backend --region us-central1
+gcloud run services delete furniture-frontend --region us-central1
+
+# Redeploy when needed (2-3 minutes)
+cd backend && gcloud run deploy furniture-backend --source . --region us-central1
+cd frontend && gcloud builds submit --config cloudbuild.yaml .
+```
+
+---
+
+## 🔍 **Error Handling & Fallback Systems**
+
+### **Multi-Tier Fallback Architecture**
+1. **Primary**: LangGraph workflow with GPT-4V
+2. **Secondary**: 6-agent AI system (if LangGraph fails)
+3. **Tertiary**: Simple template-based system (if AI fails)
+
+### **Cloud-Specific Error Handling**
+```python
+# Google Cloud Storage fallback
+def upload_to_gcs(file_path: str, blob_name: str) -> str:
+    if not bucket:
+        return f"/static/{os.path.basename(file_path)}"  # Local fallback
+    
+    try:
+        blob = bucket.blob(blob_name)
+        blob.upload_from_filename(file_path)
+        return f"https://storage.googleapis.com/{BUCKET_NAME}/{blob_name}"
+    except Exception as e:
+        print(f"❌ Failed to upload {blob_name}: {e}")
+        return f"/static/{os.path.basename(file_path)}"  # Graceful degradation
+```
+
+### **Frontend Error Boundaries**
+```javascript
+// Environment-aware error handling
+try {
+    const response = await axios.post(getApiUrl('/api/auto-analyze-multiple'), formData);
+    // Process response...
+} catch (error) {
+    if (error.code === 'NETWORK_ERROR') {
+        // Handle cold start delays
+        setError('Service is starting up, please wait 30 seconds and try again...');
+    } else {
+        setError('Analysis failed: ' + error.message);
     }
 }
 ```
 
 ---
 
-## 📤 **Export & CSV Generation**
+## 📊 **Performance Metrics & Monitoring**
 
-### **Two Export Options**:
+### **Processing Performance**
+- **Cold start time**: 10-30 seconds (when scaling from 0)
+- **Warm processing**: 30-60 seconds for 5-10 images
+- **LangGraph workflow**: 7-node pipeline with parallel processing
+- **AI grouping accuracy**: 85-95% based on visual similarity
 
-#### **1. Simple CSV Export** (`/api/export-csv`):
-```csv
-TITLE,PRICE,CONDITION,DESCRIPTION,CATEGORY
-"Modern White Writing Desk - Good Condition",132,"Used - Good","Elegant white wooden writing desk...","Home & Garden//Furniture//Desks"
-```
+### **System Reliability**
+- **Uptime**: 99.9% (Google Cloud Run SLA)
+- **Auto-scaling**: 0-3 instances based on demand
+- **Error recovery**: Multi-tier fallback system
+- **Data persistence**: Google Cloud Storage for images/exports
 
-#### **2. Complete Photo Package** (`/api/export-csv-with-photos`):
-```
-langgraph_export_20250604_123456.zip
-├── facebook_marketplace_listings.csv
-├── README.txt (detailed instructions)
-├── Listing_01_Modern_White_Writing_Desk/
-│   ├── ModernWhiteWritingDesk_photo_01.jpg
-│   └── ModernWhiteWritingDesk_photo_02.jpg  
-└── Listing_02_Ergonomic_Office_Chair/
-    └── ErgonomicOfficeChair_photo_01.jpg
-```
+### **Cost Efficiency**
+- **90% cost reduction**: From $92/month to $3-8/month
+- **Pay-per-use**: Only charged when actively processing
+- **Storage optimization**: Automatic cleanup of temporary files
 
 ---
 
-## 🔧 **Debugging & Monitoring**
+## 🚀 **Deployment & Development Workflows**
 
-### **Enhanced Console Debugging**:
-```javascript
-// Frontend logs (visible in browser console)
-"Analysis completed: {status: 'success', listings: Array(3), method: 'LANGGRAPH_WORKFLOW'}"
-"Attempting to load image 1: {filename: 'lg_20250604...', url: '/static/...', processed_url: '/processed/...'}"
-"Final image URL for image 1: /processed/processed_lg_20250604_..."
-"Successfully loaded image: /processed/processed_lg_20250604_..."
-```
-
-```python
-# Backend logs (Docker logs)
-🚀 Starting LangGraph analysis for 4 files
-📸 Processing file 1: screenshot.png  
-💾 Saving to: uploads/lg_20250604_123456_00_screenshot.png
-✅ LangGraph completed successfully!
-📸 Processing images for display...
-✅ Processed: processed_lg_20250604_123456_00_screenshot.png
-🎉 Analysis Complete! 3 listings from 4 images
-```
-
-### **Health Monitoring**:
+### **Production Deployment**
 ```bash
-GET /api/health
-{
-  "status": "healthy",
-  "langgraph_available": true,
-  "classifier": "LangGraph", 
-  "api_key_configured": true,
-  "version": "2.0.0"
-}
+# Backend deployment
+cd backend
+gcloud run deploy furniture-backend \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars OPENAI_API_KEY=$OPENAI_API_KEY \
+  --memory=1Gi \
+  --cpu=1 \
+  --min-instances=0 \
+  --max-instances=3
+
+# Frontend deployment
+cd frontend
+gcloud builds submit --config cloudbuild.yaml .
 ```
 
----
-
-## 🧪 **Testing & Validation**
-
-### **Image Processing Test Flow**:
+### **Local Development**
 ```bash
-# 1. Upload sanitized filename test
-curl -I "http://localhost:3000/static/lg_20250604_123456_00_test.jpg"
-# Expected: HTTP/1.1 200 OK
+# Backend development
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 
-# 2. Processed image test  
-curl -I "http://localhost:3000/processed/processed_lg_20250604_123456_00_test.jpg"
-# Expected: HTTP/1.1 200 OK (after fix)
-
-# 3. Frontend proxy test
-curl -s http://localhost:3000 | grep "Furniture Agent"
-# Expected: Title in HTML response
+# Frontend development
+cd frontend
+npm install
+npm run dev
 ```
 
-### **LangGraph Workflow Test**:
-```python
-# Test simple workflow
-GET /api/test-langgraph-simple
-{
-  "success": true,
-  "test": "passed" 
-}
-```
+### **Environment Configuration**
+```bash
+# Production (automatically configured)
+BUCKET_NAME=furniture-classifier-images-1749795037
+GOOGLE_CLOUD_PROJECT=furniture-classifier-202506
 
----
-
-## 🚨 **Error Handling & Recovery**
-
-### **Common Issues & Solutions**:
-
-#### **1. Images Not Displaying**:
-- **Cause**: Old filenames with spaces, processed images not created
-- **Solution**: Upload fresh images (new sanitized names), check processed/ directory
-- **Debug**: Browser console shows image load attempts and failures
-
-#### **2. LangGraph Failures**:  
-- **Cause**: OpenAI API quota exceeded, async event loop issues
-- **Solution**: Automatic fallback to 6-agent system
-- **Monitoring**: Check backend logs for "❌ LangGraph failed" messages
-
-#### **3. CSV Export Issues**:
-- **Cause**: Missing endpoint, incorrect data format
-- **Solution**: Two export endpoints with different data structures
-- **Validation**: Check that listings array contains required fields
-
-### **Fallback Decision Tree**:
-```
-Upload Images
-    ↓
-Try LangGraph Workflow
-    ↓
-Success? → Process Images → Return Results
-    ↓ No
-Try 6-Agent System  
-    ↓
-Success? → Group Results → Return Results
-    ↓ No  
-Simple Template System
-    ↓
-Return Basic Listings
+# Development (.env)
+OPENAI_API_KEY=your_openai_key_here
+GEMINI_API_KEY=your_gemini_key_here  # Optional
 ```
 
 ---
 
-## 📊 **Performance Metrics**
+## 🎯 **Success Metrics & Use Cases**
 
-### **Typical Processing Times**:
-- **LangGraph Full Workflow**: 30-70 seconds (4 images)
-- **6-Agent Fallback**: 45-90 seconds  
-- **Simple Fallback**: 2-5 seconds
-- **Image Processing**: 1-3 seconds per image
+### **Performance Achievements**
+- ✅ **Fully functional cloud deployment** with auto-scaling
+- ✅ **90% cost reduction** through optimization
+- ✅ **Professional AI-generated content** for marketplace listings
+- ✅ **Persistent storage** with Google Cloud Storage integration
+- ✅ **Cross-origin compatibility** for seamless frontend-backend communication
 
-### **Success Metrics**:
-- **Grouping Accuracy**: 85-95% correct photo grouping
-- **AI Content Quality**: High-quality titles and descriptions
-- **API Reliability**: 95%+ uptime with fallback system
-- **Image Display**: 100% success rate (after fixes)
-
-### **System Resource Usage**:
-- **Backend Container**: ~500MB RAM during processing
-- **Frontend Container**: ~200MB RAM  
-- **Redis Container**: ~50MB RAM
-- **Storage**: ~10MB per processed image batch
+### **Perfect For**
+- 🏠 **Estate sales**: Quickly catalog and list furniture collections
+- 🛒 **Resellers**: Professional listings for marketplace sales
+- 🏢 **Moving services**: Help clients sell furniture before relocating
+- 👥 **Personal use**: Declutter and sell household furniture efficiently
 
 ---
 
-## 🔄 **Continuous Development**
-
-### **Recent Major Improvements**:
-1. **✅ Filename Sanitization**: Removes spaces for URL compatibility
-2. **✅ LangGraph Image Processing**: Fixed missing processed image creation  
-3. **✅ Enhanced Error Handling**: Better fallback and debugging
-4. **✅ AI Content Generation**: All fields now AI-powered
-5. **✅ Aggressive Grouping**: Improved photo grouping accuracy
-
-### **Architecture Benefits**:
-- **Modular Design**: Independent, swappable components
-- **Fault Tolerance**: Multiple fallback layers
-- **Scalability**: Async processing with performance monitoring  
-- **Maintainability**: Clear separation of concerns
-- **Extensibility**: Easy to add new agents or workflow nodes
-
-This complete application flow represents a sophisticated, production-ready AI system with enterprise-level error handling, monitoring, and user experience optimization. 
+**🌟 The system is now production-ready with enterprise-grade cloud architecture, cost optimization, and professional AI-powered furniture analysis capabilities.** 

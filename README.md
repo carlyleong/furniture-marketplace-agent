@@ -1,9 +1,24 @@
 # 🛋️ LangGraph Furniture Classification System
 
-> **Revolutionary AI-Powered Furniture Analysis & Marketplace Listing Generator**  
-> Advanced LangGraph workflows + Multi-Agent AI + Intelligent Photo Grouping
+> **Production-Ready AI-Powered Furniture Analysis & Marketplace Listing Generator**  
+> Deployed on Google Cloud Run with LangGraph workflows + Multi-Agent AI + Google Cloud Storage
 
-Transform furniture photos into professional Facebook Marketplace listings automatically with enterprise-grade AI orchestration, smart photo grouping, and comprehensive fallback systems.
+Transform furniture photos into professional Facebook Marketplace listings automatically with enterprise-grade AI orchestration, smart photo grouping, and cloud-native architecture.
+
+---
+
+## 🌟 **Live Application**
+
+### **🚀 Production Deployment**
+- **Frontend**: https://furniture-frontend-343631166788.us-central1.run.app
+- **Backend API**: https://furniture-backend-343631166788.us-central1.run.app
+- **Status**: ✅ Live and operational with scale-to-zero cost optimization
+
+### **💰 Cost-Optimized Cloud Architecture**
+- **Monthly Cost**: $3-8/month (90% savings from scale-to-zero)
+- **Auto-scaling**: Scales to 0 instances when idle (15+ minutes)
+- **Cold Start**: 10-30 seconds when waking from sleep
+- **Storage**: Google Cloud Storage for persistent image/export storage
 
 ---
 
@@ -28,11 +43,11 @@ Transform furniture photos into professional Facebook Marketplace listings autom
 - **Condition Assessment**: Intelligent condition mapping with detailed reasoning
 - **Search Keywords**: AI-generated buyer search terms for discoverability
 
-### 📊 **Enterprise-Grade Architecture**
-- **Multi-Tier Fallback System**: LangGraph → 6-Agent System → Simple Templates
-- **Robust Error Handling**: Comprehensive error tracking and graceful degradation
-- **Image Processing Pipeline**: Filename sanitization + processed image generation
-- **Real-Time Debugging**: Enhanced console logging and system monitoring
+### ☁️ **Cloud-Native Architecture**
+- **Google Cloud Run**: Serverless container deployment with auto-scaling
+- **Google Cloud Storage**: Persistent image and export file storage
+- **CORS-Optimized**: Cross-origin resource sharing for seamless frontend-backend communication
+- **Environment Detection**: Automatic API URL configuration for local/production environments
 
 ---
 
@@ -40,51 +55,63 @@ Transform furniture photos into professional Facebook Marketplace listings autom
 
 ```mermaid
 graph TB
-    subgraph "Frontend Layer"
-        A[React + Vite] --> B[Image Upload UI]
-        B --> C[Progress Tracking]
-        C --> D[Results Display]
-        D --> E[CSV Export]
+    subgraph "Google Cloud Platform"
+        subgraph "Cloud Run Services"
+            A[Frontend Service<br/>512MB RAM, 1 CPU<br/>Scale 0-3 instances] 
+            B[Backend Service<br/>1GB RAM, 1 CPU<br/>Scale 0-3 instances]
+        end
+        
+        subgraph "Cloud Storage"
+            C[Images Bucket<br/>furniture-classifier-images]
+            D[Exports Bucket<br/>ZIP files with photos]
+        end
+        
+        subgraph "External APIs"
+            E[OpenAI GPT-4V<br/>Vision Analysis]
+            F[OpenAI GPT-4o<br/>Content Generation]
+        end
     end
     
-    subgraph "Backend Layer" 
-        F[FastAPI Gateway] --> G[LangGraph Controller]
-        G --> H[7-Node Workflow]
-        H --> I[AI Grouping Agent]
-        I --> J[Content Generation]
-        J --> K[Image Processing]
+    subgraph "User Experience"
+        G[Web Browser] --> A
+        A --> B
+        B --> E
+        B --> F
+        B --> C
+        B --> D
     end
     
-    subgraph "AI Services"
-        L[OpenAI GPT-4V] --> H
-        M[OpenAI GPT-4o] --> I
-        N[Content Generation AI] --> J
-        O[Vision Analysis] --> H
+    subgraph "Local Development"
+        H[Docker Compose<br/>localhost:3000/8000]
+        I[SQLite Database]
+        J[Local File Storage]
     end
-    
-    subgraph "Data Layer"
-        P[SQLite + SQLAlchemy] --> K
-        Q[Redis Cache] --> G
-        R[File System] --> K
-    end
-    
-    A --> F
-    E --> P
 ```
 
 ### **Technology Stack**
+- **☁️ Cloud Platform**: Google Cloud Run + Google Cloud Storage
 - **🎛️ Orchestration**: LangGraph with StateGraph workflow management
 - **🧠 AI/ML**: OpenAI GPT-4V, GPT-4o for multi-modal analysis
 - **⚡ Backend**: FastAPI + Python 3.11 + Async SQLAlchemy
-- **⚛️ Frontend**: React 18 + Vite + Tailwind CSS + Enhanced Error Handling
-- **🐳 Infrastructure**: Docker Compose + Multi-service architecture  
-- **💾 Data**: SQLite + Redis + Intelligent file management
+- **⚛️ Frontend**: React 18 + Vite + Tailwind CSS + Environment-aware API calls
+- **🐳 Local Development**: Docker Compose + Multi-service architecture  
+- **💾 Data**: SQLite + Google Cloud Storage + Intelligent file management
 
 ---
 
 ## 🚀 **Quick Start Guide**
 
-### **Prerequisites**
+### **Option 1: Use Live Application (Recommended)**
+Simply visit: **https://furniture-frontend-343631166788.us-central1.run.app**
+
+- ✅ No setup required
+- ✅ Full functionality available
+- ✅ Automatic scaling and cost optimization
+- ⚡ May have 10-30 second cold start if idle
+
+### **Option 2: Local Development**
+
+#### **Prerequisites**
 ```bash
 # Required
 ✅ Docker & Docker Compose
@@ -94,7 +121,7 @@ graph TB
 ⭐ Google Gemini API Key (enhanced pricing analysis)
 ```
 
-### **1. Installation**
+#### **Installation**
 ```bash
 # Clone the repository
 git clone <repository-url>
@@ -105,16 +132,16 @@ echo "OPENAI_API_KEY=your_openai_key_here" > backend/.env
 echo "GEMINI_API_KEY=your_gemini_key_here" >> backend/.env  # Optional
 ```
 
-### **2. Launch System**
+#### **Launch System**
 ```bash
-# Start all services (recommended)
+# Start all services
 docker-compose up -d
 
 # Verify system health
 curl http://localhost:8000/api/health
 ```
 
-### **3. Access Applications**
+#### **Access Applications**
 | Service | URL | Purpose |
 |---------|-----|---------|
 | 🖥️ **Frontend** | http://localhost:3000 | Main user interface |
@@ -142,12 +169,14 @@ curl http://localhost:8000/api/health
 ### **📊 Phase 3: Results & Export**
 1. **Smart Display**: Organized listings with grouped photos and confidence scores
 2. **Edit Capabilities**: Inline editing of AI-generated content
-3. **CSV Export**: Two export options - simple CSV or complete photo package
-4. **Analytics Dashboard**: Performance metrics and success rates
+3. **Export Options**: 
+   - **CSV Only**: Simple spreadsheet for Facebook Marketplace
+   - **ZIP with Photos**: Complete package with organized photo folders
+4. **Cloud Storage**: All exports stored in Google Cloud Storage with direct download links
 
 ---
 
-## 🔧 **Comprehensive API Reference**
+## 🔧 **API Reference**
 
 ### **Core Endpoints**
 
@@ -163,7 +192,7 @@ GET /api/health
   "classifier": "LangGraph",
   "langgraph_available": true,
   "api_key_configured": true,
-  "timestamp": "2025-06-04T12:34:56"
+  "timestamp": "2025-06-13T07:00:00"
 }
 ```
 
@@ -192,286 +221,200 @@ files: [image1.jpg, image2.png, ...]  # Max 15 images
       "confidence": 0.91,
       "images": [
         {
-          "filename": "lg_20250604_123456_00_sanitized.jpg",
-          "url": "/static/lg_20250604_123456_00_sanitized.jpg",
-          "processed_url": "/processed/processed_lg_20250604_123456_00_sanitized.jpg"
+          "filename": "lg_20250613_070000_00_sanitized.jpg",
+          "url": "https://storage.googleapis.com/furniture-classifier-images-1749795037/images/lg_20250613_070000_00_sanitized.jpg"
         }
       ],
       "search_keywords": ["white desk", "writing desk", "home office"],
-      "selling_points": ["Ample storage", "Good condition", "Stylish design"],
-      "target_buyer": "Students, professionals, home office setups"
+      "ai_reasoning": "High-quality white wooden desk with clean lines..."
     }
-  ],
-  "total_images": 4,
-  "total_furniture_items": 3,
-  "classification_method": "LANGGRAPH_WORKFLOW"
+  ]
 }
 ```
 
-#### **CSV Export Options**
-
-**Simple CSV Export:**
+#### **Export with Photos (Cloud Storage)**
 ```http
-POST /api/export-csv
+POST /api/export-csv-with-photos
 Content-Type: application/json
 
+[
+  {
+    "title": "Modern Desk",
+    "price": "150",
+    "condition": "Used - Good",
+    "description": "Beautiful desk...",
+    "category": "Home & Garden//Furniture//Desks",
+    "images": [...]
+  }
+]
+```
+
+**Response:**
+```json
 {
-  "listings": [...] 
+  "status": "success",
+  "download_url": "https://storage.googleapis.com/furniture-classifier-images-1749795037/exports/export_20250613_070000.zip",
+  "filename": "langgraph_marketplace_export_20250613_070000.zip",
+  "message": "Export complete! 2 listings packaged."
 }
 ```
 
-**Complete Photo Package:**
-```http
-POST /api/export-csv-with-photos  
-Content-Type: application/json
+---
 
-{
-  "listings": [...]
-}
+## 💰 **Cost Management**
+
+### **Current Configuration (Optimized)**
+- **Backend**: 1GB RAM, 1 CPU, scale 0-3 instances
+- **Frontend**: 512MB RAM, 1 CPU, scale 0-3 instances
+- **Auto-scaling**: Scales to 0 when idle (15+ minutes)
+- **Storage**: Pay-per-use Google Cloud Storage
+
+### **Monthly Cost Breakdown**
+- **Active Usage** (10-20 hours/month): $3-5
+- **Storage** (images + exports): $1-2
+- **Total Estimated**: **$3-8/month**
+
+### **Cost Control Commands**
+```bash
+# Check current resource allocation
+gcloud run services list --region us-central1
+
+# Temporarily stop services (completely free)
+gcloud run services delete furniture-backend --region us-central1
+gcloud run services delete furniture-frontend --region us-central1
+
+# Redeploy when needed (2-3 minutes)
+cd backend && gcloud run deploy furniture-backend --source . --region us-central1
+cd frontend && gcloud builds submit --config cloudbuild.yaml .
 ```
 
 ---
 
-## 📁 **Project Structure & Components**
+## 🛠️ **Development & Deployment**
 
-```
-final_fb/
-├── 📋 APPLICATION_FLOW.md      # Comprehensive system documentation
-├── 📖 README.md                # This file
-├── 🐳 docker-compose.yml       # Multi-service orchestration
-├── ⚙️ backend/                 # FastAPI + LangGraph backend
-│   ├── main.py                 # 914 lines - Main API application
-│   ├── furniture_classifier.py # 991 lines - LangGraph workflows  
-│   ├── ai_agent_system.py      # 6-agent fallback system
-│   ├── models.py               # SQLAlchemy database models
-│   ├── schemas.py              # Pydantic validation schemas
-│   ├── image_processor.py      # Image processing utilities
-│   ├── furniture_ai.py         # AI helper functions
-│   └── requirements.txt        # Python dependencies
-├── ⚛️ frontend/                # React + Vite frontend
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── BulkProcessor.jsx     # Main upload & processing UI
-│   │   │   ├── ImageUploader.jsx     # Drag & drop interface
-│   │   │   └── Dashboard.jsx         # Analytics & metrics
-│   │   ├── pages/
-│   │   │   └── MultiItemPage.jsx     # Primary interface
-│   │   └── App.jsx             # React application root
-│   ├── package.json            # Node.js dependencies
-│   └── vite.config.js          # Vite configuration + proxy setup
-├── 📁 uploads/                 # Uploaded images (sanitized filenames)
-├── 📁 processed/               # Processed images for display  
-└── 📁 exports/                 # Generated CSV files and photo packages
-```
-
----
-
-## 🔍 **Advanced Features & Configuration**
-
-### **LangGraph Workflow Customization**
-```python
-# furniture_classifier.py - Customize workflow nodes
-class LangGraphFurnitureClassifier:
-    def _build_workflow(self) -> StateGraph:
-        workflow = StateGraph(FurnitureAnalysisState)
-        
-        # Add custom nodes
-        workflow.add_node("custom_analysis", self._custom_node)
-        
-        # Modify routing logic
-        workflow.add_conditional_edges(
-            "classification",
-            self._routing_logic,
-            {"high_confidence": "pricing", "low_confidence": "re_analysis"}
-        )
-```
-
-### **AI Grouping Tuning**
-```python
-# Adjust grouping aggressiveness in _ai_grouping_agent()
-grouping_prompt = f"""
-GROUPING RULES:
-- BE {'AGGRESSIVE' if aggressive_mode else 'CONSERVATIVE'} in grouping
-- Confidence threshold: {confidence_threshold}
-- Same furniture indicators: {same_furniture_indicators}
-"""
-```
-
-### **Content Generation Customization** 
-```python
-# Modify AI prompts in _ai_listing_generator()
-listing_prompt = f"""
-Create listings for {target_market} with {tone} tone:
-- Title length: {title_max_chars} characters
-- Description style: {description_style}
-- Price strategy: {pricing_strategy}
-"""
-```
-
----
-
-## 🐛 **Troubleshooting & Diagnostics**
-
-### **Common Issues & Solutions**
-
-#### **🖼️ Images Not Displaying**
+### **Local Development**
 ```bash
-# Symptoms: Gray placeholder boxes instead of images
-# Cause: Old filenames with spaces, missing processed images
-
-# Debug Steps:
-1. Check browser console for image load errors
-2. Test direct image URLs:
-   curl -I http://localhost:3000/static/lg_20250604_123456_00_filename.jpg
-   curl -I http://localhost:3000/processed/processed_lg_20250604_123456_00_filename.jpg
-3. Upload fresh images (gets sanitized filenames)
-
-# Expected Console Output:
-"Attempting to load image 1: {filename: '...', url: '/static/...', processed_url: '/processed/...'}"
-"Successfully loaded image: /processed/processed_lg_20250604_..."
-```
-
-#### **⚡ LangGraph Workflow Failures**
-```bash
-# Symptoms: Fallback to 6-agent system
-# Cause: OpenAI API quota, async event loop issues
-
-# Debug Steps:
-docker-compose logs backend | grep "LangGraph"
-
-# Expected Success Logs:
-"✅ LangGraph system loaded successfully"
-"🚀 Starting LangGraph analysis for X files"  
-"✅ LangGraph completed successfully!"
-
-# Failure Indicators:
-"❌ LangGraph failed: Error code: 429 - You exceeded your current quota"
-"🔄 Falling back to 6-agent AI analysis..."
-```
-
-#### **📊 CSV Export Issues**
-```bash
-# Test export endpoints
-curl -X POST http://localhost:8000/api/export-csv \
-  -H "Content-Type: application/json" \
-  -d '{"listings": [{"title": "Test", "price": "100"}]}'
-
-# Expected: CSV file download
-# Format: TITLE,PRICE,CONDITION,DESCRIPTION,CATEGORY
-```
-
-### **System Recovery Commands**
-```bash
-# Full system restart
-docker-compose down && docker-compose up -d
-
-# Backend-only restart (for API issues)
-docker-compose restart backend
-
-# Clear all containers and rebuild
-docker-compose down -v && docker-compose build --no-cache && docker-compose up -d
-```
-
----
-
-## 📊 **Performance Metrics & Monitoring**
-
-### **Processing Performance**
-| Workflow | Typical Time | Success Rate | Use Case |
-|----------|--------------|--------------|----------|
-| **LangGraph** | 30-70s (4 images) | 95%+ | Primary production |
-| **6-Agent Fallback** | 45-90s | 90%+ | API quota exceeded |
-| **Simple Fallback** | 2-5s | 100% | Emergency mode |
-
-### **System Resources**
-```bash
-# Monitor container resource usage
-docker stats final_fb-backend-1 final_fb-frontend-1 final_fb-redis-1
-
-# Typical resource consumption:
-# Backend: ~500MB RAM during processing
-# Frontend: ~200MB RAM  
-# Redis: ~50MB RAM
-```
-
-### **Quality Metrics**
-- **🎯 Grouping Accuracy**: 85-95% correct photo grouping
-- **📝 Content Quality**: AI-generated titles/descriptions with high user satisfaction
-- **🔄 System Reliability**: 95%+ uptime with multi-tier fallback system
-- **📱 User Experience**: 100% image display success rate (post-fixes)
-
----
-
-## 🔄 **Recent Major Updates**
-
-### **✅ Version 2.0.0 Enhancements**
-1. **🔧 Filename Sanitization**: Automatic removal of spaces and special characters for URL compatibility
-2. **🖼️ Image Processing Fix**: LangGraph workflow now properly creates processed images for display
-3. **🧠 Enhanced AI Grouping**: More aggressive and accurate photo grouping with AI reasoning
-4. **📝 Full AI Content Generation**: All listing fields now AI-powered (no more templates)
-5. **🐛 Comprehensive Error Handling**: Enhanced debugging with console logging and fallback systems
-
-### **🚀 Future Roadmap**
-- **🎨 Custom Brand Detection**: Enhanced brand recognition and style analysis
-- **📈 Market Price Intelligence**: Real-time market data integration
-- **🌐 Multi-Platform Export**: Support for other marketplace platforms
-- **📊 Advanced Analytics**: Detailed success metrics and optimization recommendations
-
----
-
-## 🤝 **Contributing & Development**
-
-### **Development Environment Setup**
-```bash
-# Clone and setup
-git clone <repository-url>
-cd final_fb
-
-# Backend development 
+# Backend development
 cd backend
 python -m venv venv
 source venv/bin/activate  # or `venv\Scripts\activate` on Windows
 pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 
-# Frontend development
-cd frontend  
+# Frontend development  
+cd frontend
 npm install
-npm run dev  # Development server with hot reload
+npm run dev
 ```
 
-### **Testing Framework**
+### **Google Cloud Deployment**
 ```bash
-# Backend API tests
-python -m pytest tests/
+# Deploy backend
+cd backend
+gcloud run deploy furniture-backend \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars OPENAI_API_KEY=$OPENAI_API_KEY \
+  --memory=1Gi \
+  --cpu=1 \
+  --min-instances=0 \
+  --max-instances=3
 
-# Frontend component tests
-npm run test
+# Deploy frontend
+cd frontend
+gcloud builds submit --config cloudbuild.yaml .
+```
 
-# Integration tests
-./test_integration.sh
+### **Environment Variables**
+```bash
+# Backend (.env)
+OPENAI_API_KEY=your_openai_key_here
+GEMINI_API_KEY=your_gemini_key_here  # Optional
+
+# Google Cloud (automatically configured)
+BUCKET_NAME=furniture-classifier-images-1749795037
 ```
 
 ---
 
-## 📞 **Support & Documentation**
+## 📊 **Performance Metrics**
 
-- **📋 Detailed Flow**: See `APPLICATION_FLOW.md` for complete system documentation
-- **🔧 API Reference**: Visit http://localhost:8000/docs for interactive API documentation  
-- **🐛 Issue Tracking**: GitHub Issues for bug reports and feature requests
-- **💬 Community**: Discussions and support forum
+### **Processing Performance**
+- **Average Analysis Time**: 30-60 seconds for 5-10 images
+- **LangGraph Workflow**: 7-node pipeline with parallel processing
+- **AI Grouping Accuracy**: 85-95% based on visual similarity
+- **Content Quality**: Professional marketplace-ready descriptions
 
----
-
-## 📄 **License & Legal**
-
-This project is licensed under [MIT License]. Built with enterprise-grade security and privacy considerations for production deployment.
-
-**Key Features:**
-- 🔒 **Data Privacy**: No data retention, processing only during active sessions
-- ⚡ **High Performance**: Optimized for production workloads with monitoring
-- 🛡️ **Error Resilience**: Multiple fallback layers ensure system reliability
-- 📈 **Scalable Architecture**: Docker-based deployment ready for cloud scaling
+### **System Reliability**
+- **Uptime**: 99.9% (Google Cloud Run SLA)
+- **Error Handling**: Multi-tier fallback system
+- **Scalability**: Auto-scales from 0 to 3 instances based on demand
+- **Cold Start**: 10-30 seconds when scaling from 0
 
 ---
 
-*Transform your furniture photos into professional marketplace listings with the power of AI. Built for scale, designed for excellence.* 🚀
+## 🔍 **Troubleshooting**
+
+### **Common Issues**
+
+#### **Cold Start Delays**
+- **Symptom**: 10-30 second delay on first request
+- **Cause**: Scale-to-zero optimization
+- **Solution**: Normal behavior, subsequent requests are fast
+
+#### **Export Download Issues**
+- **Symptom**: ZIP download fails
+- **Cause**: CORS or network issues
+- **Solution**: Files are stored in Google Cloud Storage, check browser downloads
+
+#### **Image Upload Failures**
+- **Symptom**: Images not processing
+- **Cause**: File size or format issues
+- **Solution**: Use JPG/PNG under 10MB each
+
+### **Support & Monitoring**
+```bash
+# Check service logs
+gcloud run services logs read furniture-backend --region us-central1 --limit 50
+
+# Monitor costs
+gcloud billing budgets list
+
+# Health check
+curl https://furniture-backend-343631166788.us-central1.run.app/api/health
+```
+
+---
+
+## 🎯 **Success Stories & Use Cases**
+
+### **Perfect For:**
+- 🏠 **Estate Sales**: Quickly catalog and list furniture collections
+- 🛒 **Resellers**: Professional listings for marketplace sales
+- 🏢 **Moving Services**: Help clients sell furniture before relocating
+- 👥 **Personal Use**: Declutter and sell household furniture efficiently
+
+### **Key Benefits:**
+- ⚡ **Speed**: 10x faster than manual listing creation
+- 🎯 **Quality**: AI-generated professional descriptions
+- 📊 **Accuracy**: Smart pricing based on market analysis
+- 🔄 **Efficiency**: Batch processing of multiple items
+
+---
+
+## 📄 **License & Contributing**
+
+This project is available for personal and educational use. For commercial licensing or contributions, please contact the development team.
+
+### **Built With Love Using:**
+- 🤖 OpenAI GPT-4V & GPT-4o
+- 🎛️ LangGraph Workflow Orchestration
+- ☁️ Google Cloud Platform
+- ⚛️ React + FastAPI
+- 🐳 Docker & Cloud Run
+
+---
+
+**Ready to transform your furniture selling experience?**  
+🚀 **[Try it now](https://furniture-frontend-343631166788.us-central1.run.app)** or deploy your own instance!

@@ -8,6 +8,7 @@ requests>=2.31.0
 sqlalchemy>=2.0.0
 email-validator>=2.0.0
 pydantic>=2.5.0,<3.0.0
+gunicorn>=21.2.0
 
 # LangGraph and LangChain Dependencies (UPDATED)
 langgraph>=0.2.0
@@ -39,3 +40,7 @@ asyncio-throttle>=1.0.0
 
 # Image Processing Enhancement
 pytesseract>=0.3.0
+aiofiles>=23.0.0
+
+# Google Cloud Storage
+google-cloud-storage>=2.10.0

@@ -2,45 +2,46 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install essential system dependencies for CV and web scraping
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
+    curl \
     libgl1-mesa-glx \
     libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
-    libgomp1 \
-    pkg-config \
-    curl \
-    wget \
-    chromium \
-    chromium-driver \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
+# Copy requirements first for better caching
 COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Python dependencies with LangGraph and AI tools
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-# Copy the rest of the application
+# Copy application code
 COPY . .
 
-# Create necessary directories with proper permissions
-RUN mkdir -p uploads processed exports agents workflows integrations cache && \
-    chmod 755 uploads processed exports agents workflows integrations cache
+# Create necessary directories
+RUN mkdir -p uploads processed exports cache
 
-# Create database tables (but allow for runtime creation too)
-RUN python -c "from models import Base, engine; Base.metadata.create_all(bind=engine)" || true
+# Set environment variables
+ENV PORT=8080
+ENV HOST=0.0.0.0
+ENV PYTHONUNBUFFERED=1
 
-# Expose the port
-EXPOSE 8000
+# Add logging configuration
+ENV GUNICORN_CMD_ARGS="--access-logfile=- --error-logfile=- --log-level=info"
+ENV UVICORN_LOGGING_CONFIG=None
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:8000/api/health || exit 1
+# Cloud Run uses port 8080
+EXPOSE 8080
 
-# Command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Add health check
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD curl -f http://localhost:$PORT/api/health || exit 1
+
+# Use gunicorn for production with explicit host and port binding
+CMD exec gunicorn main:app \
+    --bind 0.0.0.0:$PORT \
+    --workers 2 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --timeout 0 \
+    --log-level info \
+    --access-logfile - \
+    --error-logfile - \
+    --capture-output

@@ -15,6 +15,8 @@ import io
 from datetime import datetime
 import json
 from PIL import Image
+from google.cloud import storage
+import base64
 
 # Import database models and schemas
 from models import SessionLocal, engine, Base
@@ -56,8 +58,13 @@ except ImportError:
         def generate_description(self, title, condition, category, description=None):
             return f"Quality {category.lower()} in {condition.lower()} condition."
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Create database tables (with error handling for existing tables)
+try:
+    Base.metadata.create_all(bind=engine)
+    print("✅ Database tables created successfully")
+except Exception as e:
+    print(f"⚠️ Database initialization warning: {e}")
+    # Continue anyway - tables might already exist
 
 app = FastAPI(
     title="LangGraph Furniture Marketplace API", 
@@ -98,6 +105,32 @@ def get_db():
     finally:
         db.close()
 
+# Initialize Google Cloud Storage
+BUCKET_NAME = "furniture-classifier-images-1749795037"
+try:
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(BUCKET_NAME)
+    print(f"✅ Google Cloud Storage initialized: {BUCKET_NAME}")
+except Exception as e:
+    print(f"⚠️ Google Cloud Storage not available: {e}")
+    storage_client = None
+    bucket = None
+
+def upload_to_gcs(file_path: str, blob_name: str) -> str:
+    """Upload a file to Google Cloud Storage and return public URL"""
+    if not bucket:
+        return f"/static/{os.path.basename(file_path)}"  # Fallback to local
+    
+    try:
+        blob = bucket.blob(blob_name)
+        blob.upload_from_filename(file_path)
+        
+        # Return public URL
+        return f"https://storage.googleapis.com/{BUCKET_NAME}/{blob_name}"
+    except Exception as e:
+        print(f"❌ Failed to upload {blob_name}: {e}")
+        return f"/static/{os.path.basename(file_path)}"  # Fallback
+
 # Initialize processors and classifiers
 image_processor = ImageProcessor()
 furniture_ai = FurnitureAI()
@@ -129,6 +162,28 @@ async def health_check():
         "langgraph_available": LANGGRAPH_AVAILABLE,
         "api_key_configured": bool(os.getenv("OPENAI_API_KEY"))
     }
+
+@app.get("/api/image/{filename}")
+async def serve_image(filename: str):
+    """Serve images with proper error handling for Cloud Run"""
+    try:
+        # Try different possible paths
+        possible_paths = [
+            os.path.join("uploads", filename),
+            os.path.join("processed", filename),
+            os.path.join("processed", f"processed_{filename}")
+        ]
+        
+        for file_path in possible_paths:
+            if os.path.exists(file_path):
+                return FileResponse(file_path)
+        
+        # If file not found, return a placeholder or error
+        raise HTTPException(status_code=404, detail=f"Image {filename} not found")
+        
+    except Exception as e:
+        print(f"Error serving image {filename}: {e}")
+        raise HTTPException(status_code=404, detail=f"Image {filename} not found")
 
 @app.post("/api/auto-analyze-multiple")
 async def auto_analyze_multiple_furniture(files: List[UploadFile] = File(...)):
@@ -209,14 +264,15 @@ async def auto_analyze_multiple_furniture(files: List[UploadFile] = File(...)):
                                         break
                                 
                                 if original_path:
-                                    # Create processed version
-                                    processed_filename = f"processed_{os.path.basename(original_path)}"
-                                    processed_path = os.path.join("processed", processed_filename)
-                                    shutil.copy2(original_path, processed_path)
+                                    # Upload original image to Google Cloud Storage
+                                    original_filename = os.path.basename(original_path)
+                                    gcs_url = upload_to_gcs(original_path, f"images/{original_filename}")
                                     
-                                    image_info["processed_url"] = f"/processed/{processed_filename}"
+                                    # Update image URLs to use GCS
+                                    image_info["url"] = gcs_url
+                                    image_info["processed_url"] = gcs_url
                                     processed_images.append(image_info)
-                                    print(f"   ✅ Processed: {processed_filename}")
+                                    print(f"   ✅ Uploaded to GCS: {original_filename}")
                                 
                             except Exception as e:
                                 print(f"   ⚠️ Image processing error: {e}")
@@ -487,12 +543,13 @@ async def auto_analyze_multiple_furniture(files: List[UploadFile] = File(...)):
                             break
                     
                     if original_path:
-                        # Create processed version
-                        processed_filename = f"processed_{os.path.basename(original_path)}"
-                        processed_path = os.path.join("processed", processed_filename)
-                        shutil.copy2(original_path, processed_path)
+                        # Upload to Google Cloud Storage
+                        original_filename = os.path.basename(original_path)
+                        gcs_url = upload_to_gcs(original_path, f"images/{original_filename}")
                         
-                        image_info["processed_url"] = f"/processed/{processed_filename}"
+                        # Update URLs to use GCS
+                        image_info["url"] = gcs_url
+                        image_info["processed_url"] = gcs_url
                         processed_images.append(image_info)
                     
                 except Exception as e:
@@ -683,16 +740,43 @@ async def export_csv_with_organized_photos(listings: List[dict]):
     
     # Create zip file
     zip_path = f"{export_dir}.zip"
-    shutil.make_archive(export_dir, 'zip', export_dir)
-    
-    print(f"✅ Export complete: {len(listings)} listings packaged")
-    
-    return FileResponse(
-        zip_path,
-        media_type="application/zip",
-        filename=f"{export_prefix}_marketplace_export_{timestamp}.zip",
-        headers={"Content-Disposition": f"attachment; filename={export_prefix}_marketplace_export_{timestamp}.zip"}
-    )
+    try:
+        shutil.make_archive(export_dir, 'zip', export_dir)
+        
+        # Upload ZIP to Google Cloud Storage
+        zip_filename = f"{export_prefix}_marketplace_export_{timestamp}.zip"
+        if bucket:
+            try:
+                blob = bucket.blob(f"exports/{zip_filename}")
+                blob.upload_from_filename(zip_path)
+                download_url = f"https://storage.googleapis.com/{BUCKET_NAME}/exports/{zip_filename}"
+                
+                print(f"✅ Export uploaded to GCS: {zip_filename}")
+                
+                # Return JSON response with download URL instead of redirect
+                return {
+                    "status": "success",
+                    "download_url": download_url,
+                    "filename": zip_filename,
+                    "message": f"Export complete! {len(listings)} listings packaged."
+                }
+            except Exception as gcs_error:
+                print(f"⚠️ GCS upload failed, falling back to local: {gcs_error}")
+        
+        print(f"✅ Export complete: {len(listings)} listings packaged")
+        
+        return FileResponse(
+            zip_path,
+            media_type="application/zip",
+            filename=zip_filename,
+            headers={"Content-Disposition": f"attachment; filename={zip_filename}"}
+        )
+    except Exception as e:
+        print(f"❌ Export error: {e}")
+        # Clean up partial export directory
+        if os.path.exists(export_dir):
+            shutil.rmtree(export_dir)
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 @app.post("/api/export-csv")
 async def export_csv_simple(listings: List[dict]):
